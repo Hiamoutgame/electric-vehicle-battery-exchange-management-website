@@ -13,6 +13,7 @@ The target is not only to describe folders, but also to show:
 - which module serves which role
 - where `Request`, `Response`, `Service`, `Repository`, and `Entity` should live
 - how the codebase should grow without mixing business logic across modules
+- how the backend should be organized for `PostgreSQL` instead of `SQL Server`
 
 ## Alignment Rules
 
@@ -27,6 +28,36 @@ That means:
 - if an API exists in `BE_document_APIResult.md`, it should map to a clear controller and service flow
 - if a role has a bounded scope in `BE_document_UserStory.md`, the backend module should keep that scope isolated
 - if a station-scoped rule exists for `STAFF`, the validation must be handled in service layer and repository query layer
+
+## Database Platform Direction
+
+The backend data platform should target `PostgreSQL`, not `SQL Server`.
+
+Recommended stack:
+
+- database engine: `PostgreSQL`
+- EF Core provider: `Npgsql.EntityFrameworkCore.PostgreSQL`
+- migration tool: `EF Core Migrations`
+
+This affects both code structure and schema conventions:
+
+- prefer `uuid` for identifiers instead of SQL Server `uniqueidentifier`
+- prefer `timestamp with time zone` for audit and event times
+- prefer `text` for long free-text fields instead of `nvarchar(max)`
+- prefer `numeric(p,s)` for money and battery metrics
+- use PostgreSQL indexes, constraints, and partial indexes where needed
+- avoid SQL Server-specific defaults and functions such as `GETDATE()` or `NEWSEQUENTIALID()`
+
+Recommended PostgreSQL mapping examples:
+
+```text
+C# Guid                  -> PostgreSQL uuid
+C# string (short text)   -> PostgreSQL varchar
+C# string (long text)    -> PostgreSQL text
+C# decimal               -> PostgreSQL numeric
+C# DateTimeOffset        -> PostgreSQL timestamp with time zone
+C# bool                  -> PostgreSQL boolean
+```
 
 ## Current Solution Projects
 
@@ -177,6 +208,8 @@ Recommended detail:
 - `Repositories` handle data access only
 - business rule like "staff can only view assigned station" should be enforced by service logic and query constraint together
 - soft delete, audit fields, and common entity fields should be defined in `Base`
+- PostgreSQL-specific mapping should live in `Configurations/`, not be scattered across services or controllers
+- avoid embedding raw SQL that depends on SQL Server syntax
 
 Suggested entity base:
 
@@ -194,6 +227,14 @@ Recommended shared interfaces:
 
 - `IAuditable`
 - `ISoftDelete`
+
+Recommended PostgreSQL conventions inside repository project:
+
+- keep entity names in singular PascalCase in C#
+- map table names and column names explicitly in EF Core if the team wants snake_case in PostgreSQL
+- use `DateTimeOffset` for audit fields in entities where timezone matters
+- use partial unique indexes for cases like "one active staff assignment" or "one active subscription per vehicle"
+- put advanced PostgreSQL mappings such as enum conversion, `jsonb`, or computed indexes in `Configurations/`
 
 ### 4. `EV_BatteryChangeStation_Service`
 
@@ -228,6 +269,7 @@ Recommended detail:
 - `InternalService` contains domain logic for system modules
 - `ExternalService` contains gateway integrations such as payment or map provider
 - service layer is the main place to enforce acceptance criteria from `UserStory`
+- service layer should not contain PostgreSQL SQL text unless there is a clear performance reason and it is isolated behind repository methods
 
 ## Recommended Business Modules
 
@@ -576,6 +618,21 @@ EV_BatteryChangeStation_Repository
 |   |-- UnitOfWork.cs
 ```
 
+Recommended PostgreSQL-specific files under repository project:
+
+```text
+EV_BatteryChangeStation_Repository
+|-- DBContext
+|   |-- AppDbContext.cs
+|   |-- DesignTimeDbContextFactory.cs
+|-- Configurations
+|   |-- AccountConfiguration.cs
+|   |-- StationConfiguration.cs
+|   |-- BookingConfiguration.cs
+|   |-- SwappingTransactionConfiguration.cs
+|-- Migrations
+```
+
 ## Suggested Controller Mapping
 
 To keep API routing readable, use this controller grouping:
@@ -646,6 +703,47 @@ Examples:
 - filtered query execution
 - uniqueness lookup
 - transaction persistence
+- PostgreSQL-friendly query optimization using indexes, projections, and server-side filtering
+
+## PostgreSQL Implementation Rules
+
+When implementing the refactor, the team should follow these PostgreSQL rules:
+
+### 1. Connection and provider
+
+- use `UseNpgsql(...)` in `Program.cs` or service registration
+- keep connection string settings under configuration, not hard-coded
+- use one `AppDbContext` per request scope
+
+### 2. Naming and schema
+
+- C# entity names may stay PascalCase
+- database table and column names should consistently use either EF defaults or explicit snake_case mapping
+- do not mix SQL Server naming assumptions into migrations
+
+### 3. Default values and generated ids
+
+- use PostgreSQL uuid generation strategy instead of SQL Server sequential guid functions
+- use PostgreSQL current timestamp functions for database-side defaults
+- prefer generating ids in application code or via PostgreSQL `gen_random_uuid()`
+
+### 4. Date and time
+
+- prefer `DateTimeOffset` in API, entity, and service boundaries when the time carries timezone meaning
+- store operational timestamps in PostgreSQL as `timestamp with time zone`
+- avoid ambiguous local server times for booking, payment, and swap events
+
+### 5. Constraints and indexes
+
+- use check constraints for status values where practical
+- use partial unique indexes for active-only uniqueness rules
+- add indexes based on real query paths such as station inventory, booking by station and status, and support request by account or station
+
+### 6. Transactions
+
+- booking approval, swap completion, battery state update, and payment record should run inside a transaction boundary
+- repository and unit of work implementation must support PostgreSQL transaction handling cleanly
+- concurrency-sensitive flows should be designed for PostgreSQL row locking behavior when needed
 
 ## RBAC And Scope Rule
 
@@ -712,6 +810,7 @@ If the backend is refactored gradually, follow this order:
 4. group service code by business module
 5. group repository code by entity and query responsibility
 6. enforce RBAC and station-scope checks in service layer
+7. finalize PostgreSQL provider, migrations, naming, and indexing conventions
 
 ## Final Note
 
