@@ -2,6 +2,10 @@
 
 A full-stack web application for managing electric vehicle battery exchange stations, built with .NET 8.0 backend and React frontend.
 
+## Project Description
+
+**Tech Stack:** React (Vite) frontend, .NET 8.0 (C#) backend with Entity Framework Core, SQL Server, and VietMap API integration. **Key Contributions:** Developed frontend React components, integrated VietMap API for interactive maps and route visualization, and configured CORS policies and port settings in the C# backend. **Learning Outcomes:** Gained experience in API setup and consumption, React component development with asset/template management, and backend configuration including database connections, JWT authentication, and CORS middleware.
+
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
