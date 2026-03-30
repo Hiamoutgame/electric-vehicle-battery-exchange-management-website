@@ -4,7 +4,6 @@ WORKDIR /src
 
 # Copy all .csproj files
 COPY EV_BatteryChangeStation/EV_BatteryChangeStation.csproj EV_BatteryChangeStation/
-COPY EV_BatteryChangeStation_Common/EV_BatteryChangeStation_Common.csproj EV_BatteryChangeStation_Common/
 COPY EV_BatteryChangeStation_Repository/EV_BatteryChangeStation_Repository.csproj EV_BatteryChangeStation_Repository/
 COPY EV_BatteryChangeStation_Service/EV_BatteryChangeStation_Service.csproj EV_BatteryChangeStation_Service/
 

@@ -8,22 +8,64 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<App
 {
     public AppDbContext CreateDbContext(string[] args)
     {
-        var basePath = Directory.GetCurrentDirectory();
+        var currentDirectory = Directory.GetCurrentDirectory();
+        var candidateBasePaths = new[]
+        {
+            currentDirectory,
+            Path.GetFullPath(Path.Combine(currentDirectory, "..", "EV_BatteryChangeStation"))
+        };
 
-        var configuration = new ConfigurationBuilder()
-            .SetBasePath(basePath)
-            .AddJsonFile("appsettings.json", optional: true)
+        IConfigurationRoot? configuration = null;
+        foreach (var basePath in candidateBasePaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!Directory.Exists(basePath))
+            {
+                continue;
+            }
+
+            configuration = new ConfigurationBuilder()
+                .SetBasePath(basePath)
+                .AddJsonFile("appsettings.json", optional: true)
+                .Build();
+
+            var hasConnectionString =
+                configuration.GetConnectionString("PostgresConnection") is not null ||
+                configuration.GetConnectionString("PostgresV2Connection") is not null ||
+                configuration.GetConnectionString("DefaultConnection") is not null ||
+                configuration.GetConnectionString("V2Connection") is not null;
+
+            if (hasConnectionString)
+            {
+                break;
+            }
+        }
+
+        configuration ??= new ConfigurationBuilder()
+            .SetBasePath(currentDirectory)
             .Build();
 
-        var connectionString =
+        var postgresConnection =
             configuration.GetConnectionString("PostgresConnection") ??
+            configuration.GetConnectionString("PostgresV2Connection");
+
+        var sqlServerConnection =
             configuration.GetConnectionString("DefaultConnection") ??
-            configuration.GetConnectionString("PostgresV2Connection") ??
-            configuration.GetConnectionString("V2Connection") ??
-            throw new InvalidOperationException("No database connection string was found for design-time AppDbContext creation.");
+            configuration.GetConnectionString("V2Connection");
 
         var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
-        optionsBuilder.UseNpgsql(connectionString);
+
+        if (!string.IsNullOrWhiteSpace(postgresConnection))
+        {
+            optionsBuilder.UseNpgsql(postgresConnection);
+        }
+        else if (!string.IsNullOrWhiteSpace(sqlServerConnection))
+        {
+            optionsBuilder.UseSqlServer(sqlServerConnection);
+        }
+        else
+        {
+            throw new InvalidOperationException("No database connection string was found for design-time AppDbContext creation.");
+        }
 
         return new AppDbContext(optionsBuilder.Options);
     }
