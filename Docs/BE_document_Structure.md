@@ -651,6 +651,152 @@ Recommended mapping:
 - `AdminController`: station management, staff assignment, subscription plan, report, admin support view
 - `StaffController`: station-context, booking decision, inventory, battery inspection, swap completion, staff support response
 
+## API To Controller Mapping
+
+This section exists so the structure document still shows the API surface at a high level.
+
+Detailed request and response payloads remain in `BE_document_APIResult.md`, but ownership of each endpoint should be visible here.
+
+### 1. `AuthController`
+
+Endpoints:
+
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `GET /api/v1/auth/me`
+
+Service dependency:
+
+- `IAuthService`
+- `IAccountService`
+
+### 2. `StationsController`
+
+Endpoints:
+
+- `GET /api/v1/stations`
+- `GET /api/v1/stations/{stationId}`
+
+Service dependency:
+
+- `IStationService`
+
+### 3. `DriverController`
+
+Endpoints:
+
+- `POST /api/v1/driver/vehicles`
+- `GET /api/v1/driver/vehicles`
+- `POST /api/v1/driver/bookings`
+- `GET /api/v1/driver/bookings`
+- `GET /api/v1/driver/bookings/{bookingId}`
+- `POST /api/v1/driver/subscriptions/purchase`
+- `GET /api/v1/driver/subscriptions/current`
+- `GET /api/v1/driver/payments`
+- `GET /api/v1/driver/swaps/history`
+- `POST /api/v1/driver/support-requests`
+- `GET /api/v1/driver/support-requests`
+- `POST /api/v1/driver/feedback`
+
+Service dependency:
+
+- `IVehicleService`
+- `IBookingService`
+- `ISubscriptionService`
+- `IPaymentService`
+- `ISwapService`
+- `ISupportService`
+- `IFeedbackService`
+
+### 4. `AdminController`
+
+Endpoints:
+
+- `GET /api/v1/admin/stations`
+- `POST /api/v1/admin/stations`
+- `PATCH /api/v1/admin/stations/{stationId}`
+- `DELETE /api/v1/admin/stations/{stationId}`
+- `GET /api/v1/admin/inventory/summary`
+- `POST /api/v1/admin/staff-assignments`
+- `GET /api/v1/admin/users`
+- `POST /api/v1/admin/subscription-plans`
+- `PATCH /api/v1/admin/subscription-plans/{planId}`
+- `GET /api/v1/admin/support-requests`
+- `GET /api/v1/admin/reports/revenue`
+- `GET /api/v1/admin/reports/station-demand`
+- `GET /api/v1/admin/reports/demand-forecast`
+
+Service dependency:
+
+- `IStationService`
+- `IInventoryService`
+- `IStaffAssignmentService`
+- `IAccountService`
+- `ISubscriptionService`
+- `ISupportService`
+- `IReportService`
+
+### 5. `StaffController`
+
+Endpoints:
+
+- `GET /api/v1/staff/station-context`
+- `GET /api/v1/staff/bookings`
+- `PATCH /api/v1/staff/bookings/{bookingId}/decision`
+- `GET /api/v1/staff/inventory`
+- `PATCH /api/v1/staff/batteries/{batteryId}/status`
+- `POST /api/v1/staff/swaps/complete`
+- `POST /api/v1/staff/battery-return-inspections`
+- `POST /api/v1/staff/payments/record`
+- `GET /api/v1/staff/support-requests`
+- `PATCH /api/v1/staff/support-requests/{supportRequestId}/response`
+
+Service dependency:
+
+- `IAccountService`
+- `IBookingService`
+- `IInventoryService`
+- `ISwapService`
+- `IPaymentService`
+- `ISupportService`
+
+## API Layer Folder Direction
+
+To make API ownership visible in code, the API host project should not stop at a flat `Controllers/` folder.
+
+Recommended direction:
+
+```text
+EV_BatteryChangeStation
+|-- Controllers
+|   |-- V1
+|   |   |-- ApiControllerBase.cs
+|   |   |-- AuthController.cs
+|   |   |-- StationsController.cs
+|   |   |-- DriverController.cs
+|   |   |-- AdminController.cs
+|   |   |-- StaffController.cs
+|-- Contracts
+|   |-- Common
+|   |-- V1
+|   |   |-- Auth
+|   |   |-- Stations
+|   |   |-- Vehicles
+|   |   |-- Bookings
+|   |   |-- Inventory
+|   |   |-- Swaps
+|   |   |-- Payments
+|   |   |-- Support
+|   |   |-- Reports
+```
+
+Meaning:
+
+- `Controllers/` owns endpoint grouping and route versioning
+- `Contracts/` owns request and response contracts closest to the API layer
+- shared wrappers such as `ApiResponse` can live under `Contracts/Common`
+- controller code should depend on service interfaces, never directly on repository classes
+
 ## Request And Response Placement Rule
 
 To stay consistent with `BE_document_APIResult.md`:

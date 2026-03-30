@@ -53,6 +53,29 @@ namespace EV_BatteryChangeStation_Service.InternalService.Service
             }
         }
 
+        public async Task<ServiceResult> GetByIdForAccountAsync(Guid bookingId, Guid accountId)
+        {
+            try
+            {
+                var booking = await _unitOfWork.BookingRepository.GetByIdAsync(bookingId);
+                if (booking == null)
+                {
+                    return new ServiceResult(404, "Booking not found", null, BookingErrorCode.BookingNotFound);
+                }
+
+                if (booking.AccountId != accountId)
+                {
+                    return new ServiceResult(403, "You can only access your own bookings", null, BookingErrorCode.BookingNotFound);
+                }
+
+                return new ServiceResult(200, "Success", BookingMapper.ToDTO(booking), BookingErrorCode.None);
+            }
+            catch (Exception ex)
+            {
+                return new ServiceResult(500, "Error fetching booking", new List<string> { ex.Message }, BookingErrorCode.UnexpectedError);
+            }
+        }
+
         // Tạo booking mới
         public async Task<ServiceResult> CreateAsync(BookingCreateDTO dto)
         {

@@ -14,6 +14,7 @@ namespace EV_BatteryChangeStation_Service.InternalService.IService
         Task<IServiceResult> UpdateAccountAsync(UpdateAccountDTO updateAccount);
         Task<IServiceResult> DeleteAccountAsync(Guid Id);
         Task<IServiceResult> GetAllAccountsAsync();
+        Task<IServiceResult> GetAccountProfileAsync(Guid accountId);
         Task<IServiceResult> GetAccountByNameAsync(string accountName);
         //Task<IServiceResult> GetAllAccountWithIdDecodeAsync();
         Task<IServiceResult> SoftDeleteAsync(Guid Id);

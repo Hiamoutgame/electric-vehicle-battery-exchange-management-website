@@ -232,6 +232,59 @@ namespace EV_BatteryChangeStation_Service.InternalService.Service
             }
         }
 
+        public async Task<IServiceResult> GetAccountProfileAsync(Guid accountId)
+        {
+            try
+            {
+                if (accountId == Guid.Empty)
+                {
+                    return new ServiceResult
+                    {
+                        Status = Const.FAIL_READ_CODE,
+                        Message = "Account ID is required"
+                    };
+                }
+
+                var account = await _unitOfWork.AccountRepository.GetAllWithRoleAndStation(accountId);
+                if (account == null)
+                {
+                    return new ServiceResult
+                    {
+                        Status = Const.WARNING_NO_DATA_CODE,
+                        Message = "Account not found"
+                    };
+                }
+
+                return new ServiceResult
+                {
+                    Status = Const.SUCCESS_READ_CODE,
+                    Message = Const.SUCCESS_READ_MSG,
+                    Data = new
+                    {
+                        account.AccountId,
+                        account.AccountName,
+                        account.FullName,
+                        account.Email,
+                        account.PhoneNumber,
+                        account.Address,
+                        account.Status,
+                        account.RoleId,
+                        RoleName = account.Role?.RoleName,
+                        account.StationId,
+                        StationName = account.Station?.StationName
+                    }
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ServiceResult
+                {
+                    Status = Const.ERROR_EXCEPTION,
+                    Message = ex.Message
+                };
+            }
+        }
+
         public async Task<IServiceResult> UpdateAccountAsync(UpdateAccountDTO updateAccount)
         {
             try
