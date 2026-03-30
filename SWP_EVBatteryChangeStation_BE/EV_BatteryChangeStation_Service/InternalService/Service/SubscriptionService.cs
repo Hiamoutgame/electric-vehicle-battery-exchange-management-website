@@ -1,186 +1,133 @@
-﻿using EV_BatteryChangeStation_Common.DTOs.SubscriptionDTO;
-using EV_BatteryChangeStation_Common.Enum.SubscriptionEnum;
-using EV_BatteryChangeStation_Repository.Mapper;
+using EV_BatteryChangeStation_Common.DTOs.SubscriptionDTO;
+using EV_BatteryChangeStation_Repository.DBContext;
+using EV_BatteryChangeStation_Repository.Entities;
 using EV_BatteryChangeStation_Repository.UnitOfWork;
 using EV_BatteryChangeStation_Service.Base;
 using EV_BatteryChangeStation_Service.InternalService.IService;
-using System;
-using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 
-namespace EV_BatteryChangeStation_Service.InternalService.Service
+namespace EV_BatteryChangeStation_Service.InternalService.Service;
+
+public sealed class SubscriptionService : ISubscriptionService
 {
-    public class SubscriptionService : ISubscriptionService
+    private readonly AppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
+
+    public SubscriptionService(AppDbContext context, IUnitOfWork unitOfWork)
     {
-        private readonly IUnitOfWork _unitOfWork;
+        _context = context;
+        _unitOfWork = unitOfWork;
+    }
 
-        public SubscriptionService(IUnitOfWork unitOfWork)
+    public async Task<ServiceResult> GetAllAsync()
+    {
+        var plans = await _unitOfWork.SubscriptionRepository.GetPlansAsync("ALL");
+        return ServiceResponse.Ok("Subscription plans retrieved successfully.", plans.Select(x => x.ToDto()).ToList());
+    }
+
+    public async Task<ServiceResult> GetByIdAsync(Guid id)
+    {
+        var plan = await _unitOfWork.SubscriptionRepository.GetPlanByIdAsync(id);
+        return plan is null
+            ? ServiceResponse.NotFound("Subscription plan not found.")
+            : ServiceResponse.Ok("Subscription plan retrieved successfully.", plan.ToDto());
+    }
+
+    public async Task<ServiceResult> CreateAsync(SubscriptionCreateUpdateDTO dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
         {
-            _unitOfWork = unitOfWork;
+            return ServiceResponse.BadRequest("Plan name is required.");
         }
 
-        public async Task<ServiceResult> GetAllAsync()
+        var plan = new SubscriptionPlan
         {
-            try
-            {
-                var list = await _unitOfWork.SubscriptionRepository.GetAllAsync();
-                var mapped = list.ToDTOList();
-                return new ServiceResult(200, "Get all successfully", mapped, SubscriptionErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, $"Error while getting all subscriptions: {ex.Message}", null, SubscriptionErrorCode.DatabaseError);
-            }
+            PlanId = Guid.NewGuid(),
+            PlanCode = dto.Name.Trim().ToUpperInvariant().Replace(" ", "_"),
+            PlanName = dto.Name.Trim(),
+            BasePrice = dto.Price,
+            ExtraFeePerSwap = dto.ExtraFee,
+            Description = dto.Description?.Trim(),
+            DurationDays = dto.DurationPackage ?? 30,
+            Status = "ACTIVE",
+            CreateDate = DateTime.UtcNow
+        };
+
+        _context.SubscriptionPlans.Add(plan);
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Created("Subscription plan created successfully.", plan.ToDto());
+    }
+
+    public async Task<ServiceResult> UpdateAsync(Guid id, SubscriptionCreateUpdateDTO dto)
+    {
+        var plan = await _context.SubscriptionPlans.FirstOrDefaultAsync(x => x.PlanId == id);
+        if (plan is null)
+        {
+            return ServiceResponse.NotFound("Subscription plan not found.");
         }
 
-        public async Task<ServiceResult> GetByIdAsync(Guid id)
+        if (!string.IsNullOrWhiteSpace(dto.Name))
         {
-            try
-            {
-                var sub = await _unitOfWork.SubscriptionRepository.GetByIdAsync(id);
-                if (sub == null)
-                    return new ServiceResult(404, "Subscription not found", null, SubscriptionErrorCode.SubscriptionNotFound);
-
-                return new ServiceResult(200, "Success", sub.ToDTO(), SubscriptionErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, $"Error while getting subscription by ID: {ex.Message}", null, SubscriptionErrorCode.UnexpectedError);
-            }
+            plan.PlanName = dto.Name.Trim();
+            plan.PlanCode = dto.Name.Trim().ToUpperInvariant().Replace(" ", "_");
         }
 
-        public async Task<ServiceResult> CreateAsync(SubscriptionCreateUpdateDTO dto)
+        plan.BasePrice = dto.Price;
+        plan.ExtraFeePerSwap = dto.ExtraFee;
+        plan.Description = dto.Description?.Trim();
+        plan.DurationDays = dto.DurationPackage ?? plan.DurationDays;
+        plan.UpdateDate = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Subscription plan updated successfully.", plan.ToDto());
+    }
+
+    public async Task<ServiceResult> SoftDeleteAsync(Guid id)
+    {
+        var plan = await _context.SubscriptionPlans.FirstOrDefaultAsync(x => x.PlanId == id);
+        if (plan is null)
         {
-            try
-            {
-                if (dto == null)
-                    return new ServiceResult(400, "Invalid subscription data", null, SubscriptionErrorCode.MissingRequiredField);
-
-                var entity = dto.ToEntity();
-                entity.CreateDate = DateTime.Now;
-                entity.IsActive = true;
-
-                await _unitOfWork.SubscriptionRepository.AddAsync(entity);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(201, "Created successfully", entity.ToDTO(), SubscriptionErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, $"Error while creating subscription: {ex.Message}", null, SubscriptionErrorCode.TransactionFailed);
-            }
+            return ServiceResponse.NotFound("Subscription plan not found.");
         }
 
-        public async Task<ServiceResult> UpdateAsync(Guid id, SubscriptionCreateUpdateDTO dto)
+        plan.Status = "INACTIVE";
+        plan.UpdateDate = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Subscription plan deactivated successfully.");
+    }
+
+    public async Task<ServiceResult> HardDeleteAsync(Guid id)
+    {
+        var plan = await _context.SubscriptionPlans.FirstOrDefaultAsync(x => x.PlanId == id);
+        if (plan is null)
         {
-            try
-            {
-                var entity = await _unitOfWork.SubscriptionRepository.GetByIdAsync(id);
-                if (entity == null)
-                    return new ServiceResult(404, "Subscription not found", null, SubscriptionErrorCode.SubscriptionNotFound);
-
-                if (entity.IsActive == false)
-                    return new ServiceResult(400, "Cannot update inactive subscription", null, SubscriptionErrorCode.SubscriptionAlreadyExpired);
-
-                entity.UpdateEntity(dto);
-                entity.UpdateDate = DateTime.Now;
-
-                _unitOfWork.SubscriptionRepository.Update(entity);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Updated successfully", entity.ToDTO(), SubscriptionErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, $"Error while updating subscription: {ex.Message}", null, SubscriptionErrorCode.DatabaseError);
-            }
+            return ServiceResponse.NotFound("Subscription plan not found.");
         }
 
-        public async Task<ServiceResult> SoftDeleteAsync(Guid id)
+        _context.SubscriptionPlans.Remove(plan);
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Subscription plan deleted successfully.");
+    }
+
+    public async Task<ServiceResult> RestoreAsync(Guid id)
+    {
+        var plan = await _context.SubscriptionPlans.FirstOrDefaultAsync(x => x.PlanId == id);
+        if (plan is null)
         {
-            try
-            {
-                var entity = await _unitOfWork.SubscriptionRepository.GetByIdAsync(id);
-                if (entity == null)
-                    return new ServiceResult(404, "Subscription not found", null, SubscriptionErrorCode.SubscriptionNotFound);
-
-                if (entity.IsActive == false)
-                    return new ServiceResult(400, "Subscription already inactive", null, SubscriptionErrorCode.SubscriptionAlreadyCancelled);
-
-                entity.IsActive = false;
-                entity.UpdateDate = DateTime.Now;
-
-                _unitOfWork.SubscriptionRepository.Update(entity);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Soft deleted (IsActive = false)", null, SubscriptionErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, $"Error while soft deleting subscription: {ex.Message}", null, SubscriptionErrorCode.TransactionFailed);
-            }
+            return ServiceResponse.NotFound("Subscription plan not found.");
         }
 
-        public async Task<ServiceResult> HardDeleteAsync(Guid id)
-        {
-            try
-            {
-                var entity = await _unitOfWork.SubscriptionRepository.GetByIdAsync(id);
-                if (entity == null)
-                    return new ServiceResult(404, "Subscription not found", null, SubscriptionErrorCode.SubscriptionNotFound);
+        plan.Status = "ACTIVE";
+        plan.UpdateDate = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Subscription plan restored successfully.", plan.ToDto());
+    }
 
-                _unitOfWork.SubscriptionRepository.Delete(entity);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Hard deleted", null, SubscriptionErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, $"Error while hard deleting subscription: {ex.Message}", null, SubscriptionErrorCode.DatabaseError);
-            }
-        }
-
-        public async Task<ServiceResult> RestoreAsync(Guid id)
-        {
-            try
-            {
-                var entity = await _unitOfWork.SubscriptionRepository.GetByIdAsync(id);
-                if (entity == null)
-                    return new ServiceResult(404, "Subscription not found", null, SubscriptionErrorCode.SubscriptionNotFound);
-
-                if (entity.IsActive == true)
-                    return new ServiceResult(400, "Subscription is already active", null, SubscriptionErrorCode.None);
-
-                entity.IsActive = true;
-                entity.UpdateDate = DateTime.Now;
-
-                _unitOfWork.SubscriptionRepository.Update(entity);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Subscription restored successfully", entity.ToDTO(), SubscriptionErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, $"Error while restoring subscription: {ex.Message}", null, SubscriptionErrorCode.DatabaseError);
-            }
-        }
-
-        /// <summary>
-        /// Lấy subscription đang active của user (nếu có)
-        /// </summary>
-        public async Task<ServiceResult> GetActiveByAccountIdAsync(Guid accountId)
-        {
-            try
-            {
-                var subscription = await _unitOfWork.SubscriptionRepository.GetActiveByAccountIdAsync(accountId);
-                if (subscription == null)
-                    return new ServiceResult(404, "No active subscription found for this account", null, SubscriptionErrorCode.SubscriptionNotFound);
-
-                return new ServiceResult(200, "Active subscription retrieved successfully", subscription.ToDTO(), SubscriptionErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, $"Error while getting active subscription: {ex.Message}", null, SubscriptionErrorCode.DatabaseError);
-            }
-        }
+    public async Task<ServiceResult> GetActiveByAccountIdAsync(Guid accountId)
+    {
+        var subscription = await _unitOfWork.SubscriptionRepository.GetActiveByAccountAsync(accountId);
+        return subscription is null
+            ? ServiceResponse.NotFound("Active subscription not found.")
+            : ServiceResponse.Ok("Active subscription retrieved successfully.", subscription.ToActiveSubscriptionDto());
     }
 }

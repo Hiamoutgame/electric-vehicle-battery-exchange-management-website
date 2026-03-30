@@ -1,78 +1,116 @@
-﻿using EV_BatteryChangeStation_Repository.Base;
+﻿using EV_BatteryChangeStation_Repository.DBContext;
 using EV_BatteryChangeStation_Repository.Entities;
 using EV_BatteryChangeStation_Repository.IRepositories;
+using EV_BatteryChangeStation_Repository.Models;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace EV_BatteryChangeStation_Repository.Repositories
+namespace EV_BatteryChangeStation_Repository.Repositories;
+
+public sealed class BatteryRepository : IBatteryRepository
 {
-    public class BatteryRepository : GenericRepository<Battery>, IBatteryRepository
+    private readonly AppDbContext _context;
+
+    public BatteryRepository(AppDbContext context)
     {
-        public BatteryRepository(){}
-        public BatteryRepository(EVBatterySwapContext context) => _context = context;
+        _context = context;
+    }
 
-        public Task<List<Battery>> GetAllBattery()
+    public Task<Battery?> GetByIdAsync(Guid batteryId, CancellationToken cancellationToken = default)
+    {
+        return _context.Batteries
+            .AsNoTracking()
+            .Include(x => x.BatteryType)
+            .Include(x => x.Station)
+            .FirstOrDefaultAsync(x => x.BatteryId == batteryId, cancellationToken);
+    }
+
+    public Task<Battery?> GetBestAvailableBatteryAsync(Guid stationId, Guid batteryTypeId, CancellationToken cancellationToken = default)
+    {
+        return _context.Batteries
+            .AsNoTracking()
+            .Where(x => x.StationId == stationId
+                        && x.BatteryTypeId == batteryTypeId
+                        && x.Status == "AVAILABLE")
+            .OrderByDescending(x => x.StateOfHealth ?? 0)
+            .ThenByDescending(x => x.CurrentChargeLevel ?? 0)
+            .ThenBy(x => x.CreateDate)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public Task<bool> HasAvailableCompatibleBatteryAsync(Guid stationId, Guid batteryTypeId, CancellationToken cancellationToken = default)
+    {
+        return _context.Batteries
+            .AsNoTracking()
+            .AnyAsync(x => x.StationId == stationId
+                           && x.BatteryTypeId == batteryTypeId
+                           && x.Status == "AVAILABLE",
+                cancellationToken);
+    }
+
+    public async Task<Dictionary<Guid, int>> GetAvailableCountsByStationAsync(Guid? batteryTypeId = null, CancellationToken cancellationToken = default)
+    {
+        IQueryable<Battery> query = _context.Batteries
+            .AsNoTracking()
+            .Where(x => x.StationId != null && x.Status == "AVAILABLE");
+
+        if (batteryTypeId.HasValue)
         {
-            // Chỉ lấy pin còn khả dụng (Status = true)
-            var battery = _context.Batteries
-                .Where(b => b.Status == true)
-                .ToListAsync();
-            return battery;
+            query = query.Where(x => x.BatteryTypeId == batteryTypeId.Value);
         }
 
-        public Task<List<Battery?>> GetBatteriesByType(string typeBattery)
+        return await query
+            .GroupBy(x => x.StationId!.Value)
+            .Select(g => new { StationId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.StationId, x => x.Count, cancellationToken);
+    }
+
+    public Task<List<Battery>> GetStationInventoryAsync(Guid stationId, string? status = null, Guid? batteryTypeId = null, CancellationToken cancellationToken = default)
+    {
+        IQueryable<Battery> query = _context.Batteries
+            .AsNoTracking()
+            .Include(x => x.BatteryType)
+            .Include(x => x.Station)
+            .Where(x => x.StationId == stationId);
+
+        if (!string.IsNullOrWhiteSpace(status))
         {
-            // Chỉ lấy pin còn khả dụng (Status = true)
-            return _context.Batteries
-                .Where(b => b.TypeBattery.Contains(typeBattery) && b.Status == true)
-                .ToListAsync();
+            var normalizedStatus = status.Trim().ToUpperInvariant();
+            query = query.Where(x => x.Status.ToUpper() == normalizedStatus);
         }
 
-        //lấy tất cả pin trong trạm (chỉ lấy pin còn khả dụng)
-        public async Task<List<Battery>> GetBatteryByStationId(Guid stationId)
+        if (batteryTypeId.HasValue)
         {
-            var battery = await _context.Batteries
-                .Where(b => b.StationId == stationId && b.Status == true)
-                .ToListAsync();
-            return battery;
+            query = query.Where(x => x.BatteryTypeId == batteryTypeId.Value);
         }
 
-        //kiểm tra số lượng pin trong trạm
-        public async Task<int?> GetBatteryCountByStationId(Guid stationId)
+        return query
+            .OrderBy(x => x.Status)
+            .ThenBy(x => x.SerialNumber)
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<List<StationInventorySummary>> GetInventorySummaryAsync(Guid? stationId = null, Guid? batteryTypeId = null, CancellationToken cancellationToken = default)
+    {
+        IQueryable<Station> query = _context.Stations.AsNoTracking();
+
+        if (stationId.HasValue)
         {
-            var station = await
-                _context.Stations.Where(s => s.StationId == stationId)
-                .Select(s => s.BatteryQuantity).FirstOrDefaultAsync();
-            return station;
-        }
-        //Kiểm tra pin có thể được thay thế
-        public async Task<bool?> IsBatteryAvailable(Guid batteryId)
-        {
-            var isAvailable = await _context.Batteries
-                .AnyAsync(b => b.BatteryId == batteryId && b.Status == true && b.StateOfHealth > 80);
-            return isAvailable;
+            query = query.Where(x => x.StationId == stationId.Value);
         }
 
-        public async Task<Battery?> GetAvailableBatteryAsync(Guid stationId, string typeBattery)
-        {
-            if (string.IsNullOrWhiteSpace(typeBattery))
-            {
-                return null;
-            }
-
-            return await _context.Batteries
-                .Where(b => b.StationId == stationId
-                            && b.TypeBattery != null
-                            && b.Status == true
-                            && b.StateOfHealth >= 80
-                            && b.TypeBattery.ToLower() == typeBattery.ToLower())
-                .OrderByDescending(b => b.StateOfHealth)
-                .ThenBy(b => b.PercentUse)
-                .FirstOrDefaultAsync();
-        }
+        return query
+            .Select(x => new StationInventorySummary(
+                x.StationId,
+                x.StationName,
+                x.Batteries.Count(b => (!batteryTypeId.HasValue || b.BatteryTypeId == batteryTypeId.Value) && b.Status == "AVAILABLE"),
+                x.Batteries.Count(b => (!batteryTypeId.HasValue || b.BatteryTypeId == batteryTypeId.Value) && b.Status == "RESERVED"),
+                x.Batteries.Count(b => (!batteryTypeId.HasValue || b.BatteryTypeId == batteryTypeId.Value) && b.Status == "CHARGING"),
+                x.Batteries.Count(b => (!batteryTypeId.HasValue || b.BatteryTypeId == batteryTypeId.Value) && b.Status == "IN_VEHICLE"),
+                x.Batteries.Count(b => (!batteryTypeId.HasValue || b.BatteryTypeId == batteryTypeId.Value) && b.Status == "MAINTENANCE"),
+                x.Batteries.Count(b => (!batteryTypeId.HasValue || b.BatteryTypeId == batteryTypeId.Value) && b.Status == "FAULTY"),
+                x.Batteries.Count(b => !batteryTypeId.HasValue || b.BatteryTypeId == batteryTypeId.Value)))
+            .OrderBy(x => x.StationName)
+            .ToListAsync(cancellationToken);
     }
 }
+

@@ -1,150 +1,121 @@
-﻿using EV_BatteryChangeStation_Common.DTOs.FeedBackDTO;
-using EV_BatteryChangeStation_Repository.Mapper;
-using EV_BatteryChangeStation_Repository.UnitOfWork;
+using EV_BatteryChangeStation_Common.DTOs.FeedBackDTO;
+using EV_BatteryChangeStation_Repository.DBContext;
+using EV_BatteryChangeStation_Repository.Entities;
 using EV_BatteryChangeStation_Service.Base;
 using EV_BatteryChangeStation_Service.InternalService.IService;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 
-namespace EV_BatteryChangeStation_Service.InternalService.Service
+namespace EV_BatteryChangeStation_Service.InternalService.Service;
+
+public sealed class FeedBackService : IFeedBackService
 {
-    public class FeedBackService : IFeedBackService
+    private readonly AppDbContext _context;
+
+    public FeedBackService(AppDbContext context)
     {
-        private readonly IUnitOfWork _unitOfWork;
+        _context = context;
+    }
 
-        public FeedBackService(IUnitOfWork unitOfWork)
+    public async Task<ServiceResult> GetAllAsync()
+    {
+        var feedbacks = await _context.Feedbacks
+            .AsNoTracking()
+            .OrderByDescending(x => x.CreateDate)
+            .ToListAsync();
+
+        return ServiceResponse.Ok("Feedback list retrieved successfully.", feedbacks.Select(x => x.ToDto()).ToList());
+    }
+
+    public async Task<ServiceResult> GetByIdAsync(Guid id)
+    {
+        var feedback = await _context.Feedbacks.AsNoTracking().FirstOrDefaultAsync(x => x.FeedbackId == id);
+        return feedback is null
+            ? ServiceResponse.NotFound("Feedback not found.")
+            : ServiceResponse.Ok("Feedback retrieved successfully.", feedback.ToDto());
+    }
+
+    public async Task<ServiceResult> CreateAsync(CreateFeedBackDTO dto)
+    {
+        if (!dto.Rating.HasValue || dto.Rating < 1 || dto.Rating > 5)
         {
-            _unitOfWork = unitOfWork;
+            return ServiceResponse.BadRequest("Rating must be between 1 and 5.");
         }
 
-        public async Task<ServiceResult> GetAllAsync()
+        var booking = await _context.Bookings.AsNoTracking().FirstOrDefaultAsync(x => x.BookingId == dto.BookingId);
+        if (booking is null)
         {
-            try
-            {
-                var feedbacks = await _unitOfWork.FeedBackRepository.GetAllAsync();
-                if (feedbacks == null || !feedbacks.Any())
-                    return new ServiceResult(404, "No feedbacks found.");
-
-                var data = feedbacks.Select(f => f.ToFeedBackDTO()).ToList();
-                return new ServiceResult(200, "Successfully retrieved feedback list.", data);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while retrieving feedbacks.", ex.Message);
-            }
+            return ServiceResponse.NotFound("Booking not found.");
         }
 
-        public async Task<ServiceResult> GetByIdAsync(Guid id)
+        if (booking.AccountId != dto.AccountId)
         {
-            try
-            {
-                var feedback = await _unitOfWork.FeedBackRepository.GetByIdAsync(id);
-                if (feedback == null)
-                    return new ServiceResult(404, $"Feedback with ID = {id} not found.");
-
-                return new ServiceResult(200, "Feedback retrieved successfully.", feedback.ToFeedBackDTO());
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while retrieving feedback.", ex.Message);
-            }
+            return ServiceResponse.Forbidden("You can only submit feedback for your own booking.");
         }
 
-        public async Task<ServiceResult> CreateAsync(CreateFeedBackDTO dto)
+        var feedback = new Feedback
         {
-            try
-            {
-                if (dto.Rating == null || dto.Rating < 1 || dto.Rating > 5)
-                    return new ServiceResult(400, "Rating must be between 1 and 5.");
+            FeedbackId = Guid.NewGuid(),
+            AccountId = dto.AccountId,
+            BookingId = dto.BookingId,
+            StationId = booking.StationId,
+            Rating = dto.Rating.Value,
+            Comment = dto.Comment?.Trim(),
+            CreateDate = DateTime.UtcNow
+        };
 
-                if (string.IsNullOrWhiteSpace(dto.Comment))
-                    dto.Comment = "User did not leave a comment.";
+        _context.Feedbacks.Add(feedback);
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Created("Feedback created successfully.", feedback.ToDto());
+    }
 
-                var account = await _unitOfWork.AccountRepository.GetByIdAsync(dto.AccountId);
-                if (account == null)
-                    return new ServiceResult(404, "This account does not exist.");
-
-                var booking = await _unitOfWork.BookingRepository.GetByIdAsync(dto.BookingId);
-                if (booking == null)
-                    return new ServiceResult(404, "The corresponding booking for feedback does not exist.");
-
-                var entity = dto.ToEntity();
-                entity.CreateDate = DateTime.Now;
-
-                await _unitOfWork.FeedBackRepository.AddAsync(entity);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(201, "Feedback created successfully.", entity.ToFeedBackDTO());
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while creating feedback.", ex.Message);
-            }
+    public async Task<ServiceResult> UpdateAsync(Guid id, UpdateFeedBackDTO dto)
+    {
+        var feedback = await _context.Feedbacks.FirstOrDefaultAsync(x => x.FeedbackId == id);
+        if (feedback is null)
+        {
+            return ServiceResponse.NotFound("Feedback not found.");
         }
 
-        public async Task<ServiceResult> UpdateAsync(Guid id, UpdateFeedBackDTO dto)
+        if (dto.Rating.HasValue)
         {
-            try
+            if (dto.Rating < 1 || dto.Rating > 5)
             {
-                var feedback = await _unitOfWork.FeedBackRepository.GetByIdAsync(id);
-                if (feedback == null)
-                    return new ServiceResult(404, $"Feedback with ID = {id} not found.");
-
-                if (dto.Rating.HasValue && (dto.Rating < 1 || dto.Rating > 5))
-                    return new ServiceResult(400, "Rating must be between 1 and 5.");
-
-                feedback.Rating = dto.Rating ?? feedback.Rating;
-                feedback.Comment = dto.Comment ?? feedback.Comment;
-                feedback.AccountId = dto.AccountId ?? feedback.AccountId;
-                feedback.BookingId = dto.BookingId ?? feedback.BookingId;
-
-                _unitOfWork.FeedBackRepository.Update(feedback);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Feedback updated successfully.", feedback.ToFeedBackDTO());
+                return ServiceResponse.BadRequest("Rating must be between 1 and 5.");
             }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while updating feedback.", ex.Message);
-            }
+
+            feedback.Rating = dto.Rating.Value;
         }
 
-        public async Task<ServiceResult> DeleteAsync(Guid id)
+        if (dto.Comment is not null)
         {
-            try
-            {
-                var feedback = await _unitOfWork.FeedBackRepository.GetByIdAsync(id);
-                if (feedback == null)
-                    return new ServiceResult(404, $"Feedback with ID = {id} not found.");
-
-                _unitOfWork.FeedBackRepository.Delete(feedback);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Feedback deleted successfully.");
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while deleting feedback.", ex.Message);
-            }
-        }
-        public async Task<ServiceResult> GetByAccountIdAsync(Guid accountId)
-        {
-            try
-            {
-                var feedbacks = await _unitOfWork.FeedBackRepository.GetByAccountIdAsync(accountId);
-                if (feedbacks == null || !feedbacks.Any())
-                    return new ServiceResult(404, $"No feedbacks found for Account ID = {accountId}.");
-
-                var data = feedbacks.Select(f => f.ToFeedBackDTO()).ToList();
-                return new ServiceResult(200, "Successfully retrieved feedbacks by account.", data);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while retrieving feedbacks by account.", ex.Message);
-            }
+            feedback.Comment = dto.Comment.Trim();
         }
 
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Feedback updated successfully.", feedback.ToDto());
+    }
+
+    public async Task<ServiceResult> DeleteAsync(Guid id)
+    {
+        var feedback = await _context.Feedbacks.FirstOrDefaultAsync(x => x.FeedbackId == id);
+        if (feedback is null)
+        {
+            return ServiceResponse.NotFound("Feedback not found.");
+        }
+
+        _context.Feedbacks.Remove(feedback);
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Feedback deleted successfully.");
+    }
+
+    public async Task<ServiceResult> GetByAccountIdAsync(Guid accountId)
+    {
+        var feedbacks = await _context.Feedbacks
+            .AsNoTracking()
+            .Where(x => x.AccountId == accountId)
+            .OrderByDescending(x => x.CreateDate)
+            .ToListAsync();
+
+        return ServiceResponse.Ok("Feedback list retrieved successfully.", feedbacks.Select(x => x.ToDto()).ToList());
     }
 }

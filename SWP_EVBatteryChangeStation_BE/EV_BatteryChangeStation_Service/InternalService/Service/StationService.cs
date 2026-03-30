@@ -1,201 +1,138 @@
-﻿using EV_BatteryChangeStation_Common.DTOs.StationDTO;
+using EV_BatteryChangeStation_Common.DTOs.StationDTO;
+using EV_BatteryChangeStation_Repository.DBContext;
 using EV_BatteryChangeStation_Repository.Entities;
-using EV_BatteryChangeStation_Repository.Mapper;
 using EV_BatteryChangeStation_Repository.UnitOfWork;
 using EV_BatteryChangeStation_Service.Base;
 using EV_BatteryChangeStation_Service.InternalService.IService;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 
-namespace EV_BatteryChangeStation_Service.InternalService.Service
+namespace EV_BatteryChangeStation_Service.InternalService.Service;
+
+public sealed class StationService : IStationService
 {
-    public class StationService : IStationService
+    private readonly AppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
+
+    public StationService(AppDbContext context, IUnitOfWork unitOfWork)
     {
-        private readonly IUnitOfWork _unitOfWork;
+        _context = context;
+        _unitOfWork = unitOfWork;
+    }
 
-        public StationService(IUnitOfWork unitOfWork)
+    public async Task<ServiceResult> GetAllAsync()
+    {
+        var stations = await _unitOfWork.StationRepository.GetActiveStationsAsync();
+        return ServiceResponse.Ok("Stations retrieved successfully.", stations.Select(x => x.ToDto()).ToList());
+    }
+
+    public async Task<ServiceResult> GetByIdAsync(Guid id)
+    {
+        var station = await _unitOfWork.StationRepository.GetStationDetailAsync(id);
+        return station is null
+            ? ServiceResponse.NotFound("Station not found.")
+            : ServiceResponse.Ok("Station retrieved successfully.", station.ToDto());
+    }
+
+    public async Task<ServiceResult> CreateAsync(StationCreateDTO dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.StationName) || string.IsNullOrWhiteSpace(dto.Address))
         {
-            _unitOfWork = unitOfWork;
+            return ServiceResponse.BadRequest("Station name and address are required.");
         }
 
-        // Get all stations
-        public async Task<ServiceResult> GetAllAsync()
+        var station = new Station
         {
-            try
-            {
-                var stations = await _unitOfWork.StationRepository.GetAllAsync();
-                if (stations == null || !stations.Any())
-                    return new ServiceResult(404, "No stations found in the system.");
+            StationId = Guid.NewGuid(),
+            StationName = dto.StationName.Trim(),
+            Address = dto.Address.Trim(),
+            PhoneNumber = dto.PhoneNumber?.Trim(),
+            Status = LegacyStatusMapper.ToActiveStatus(dto.Status),
+            MaxCapacity = dto.BatteryQuantity,
+            CurrentBatteryCount = 0,
+            CreateDate = DateTime.UtcNow
+        };
 
-                var data = stations.Select(s => s.ToDTO()).ToList();
-                return new ServiceResult(200, "Successfully retrieved station list.", data);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while retrieving station list.", ex.Message);
-            }
+        _context.Stations.Add(station);
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Created("Station created successfully.", station.ToDto());
+    }
+
+    public async Task<ServiceResult> UpdateAsync(Guid id, StationCreateDTO dto)
+    {
+        var station = await _context.Stations.FirstOrDefaultAsync(x => x.StationId == id);
+        if (station is null)
+        {
+            return ServiceResponse.NotFound("Station not found.");
         }
 
-        // Get station by ID
-        public async Task<ServiceResult> GetByIdAsync(Guid id)
+        if (!string.IsNullOrWhiteSpace(dto.StationName))
         {
-            try
-            {
-                var station = await _unitOfWork.StationRepository.GetByIdAsync(id);
-                if (station == null)
-                    return new ServiceResult(404, $"Station with ID = {id} not found.");
-
-                return new ServiceResult(200, "Successfully retrieved station information.", station.ToDTO());
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while retrieving station information.", ex.Message);
-            }
+            station.StationName = dto.StationName.Trim();
         }
 
-        public async Task<ServiceResult> SearchByNameAsync(string keyword)
+        if (!string.IsNullOrWhiteSpace(dto.Address))
         {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(keyword))
-                    return new ServiceResult(400, "Keyword cannot be empty.");
-
-                var stations = await _unitOfWork.StationRepository.SearchByNameAsync(keyword);
-                if (stations == null || !stations.Any())
-                    return new ServiceResult(404, $"No stations found for keyword '{keyword}'.");
-
-                return new ServiceResult(200, "Stations retrieved successfully.", stations.ToDTOList());
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while searching stations.", ex.Message);
-            }
+            station.Address = dto.Address.Trim();
         }
 
-        public async Task<ServiceResult> GetByNameAsync(string name)
+        station.PhoneNumber = dto.PhoneNumber?.Trim() ?? station.PhoneNumber;
+        station.Status = dto.Status.HasValue ? LegacyStatusMapper.ToActiveStatus(dto.Status.Value) : station.Status;
+        station.MaxCapacity = dto.BatteryQuantity ?? station.MaxCapacity;
+        station.UpdateDate = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Station updated successfully.", station.ToDto());
+    }
+
+    public async Task<ServiceResult> DeleteAsync(Guid id)
+    {
+        var station = await _context.Stations.FirstOrDefaultAsync(x => x.StationId == id);
+        if (station is null)
         {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(name))
-                    return new ServiceResult(400, "Station name cannot be empty.");
-
-                var station = await _unitOfWork.StationRepository.GetByNameAsync(name);
-                if (station == null)
-                    return new ServiceResult(404, $"Station '{name}' not found.");
-
-                var dto = new StationDTO
-                {
-                    StationId = station.StationId,
-                    StationName = station.StationName
-                };
-                return new ServiceResult(200, "Found station.", dto);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while looking up station.", ex.Message);
-            }
+            return ServiceResponse.NotFound("Station not found.");
         }
 
-        // Create a new station
-        public async Task<ServiceResult> CreateAsync(StationCreateDTO dto)
+        station.Status = "INACTIVE";
+        station.UpdateDate = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Station deactivated successfully.");
+    }
+
+    public async Task<ServiceResult> HardDeleteAsync(Guid id)
+    {
+        var station = await _context.Stations.FirstOrDefaultAsync(x => x.StationId == id);
+        if (station is null)
         {
-            try
-            {
-                if (dto == null)
-                    return new ServiceResult(400, "Invalid station data.");
-
-                if (string.IsNullOrWhiteSpace(dto.Address))
-                    return new ServiceResult(400, "Station address cannot be empty.");
-                if (string.IsNullOrWhiteSpace(dto.PhoneNumber))
-                    return new ServiceResult(400, "Phone number cannot be empty.");
-
-                var entity = dto.ToEntity();
-
-                
-                _unitOfWork.StationRepository.Create(entity);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(201, "Station created successfully.", entity.ToDTO());
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[CreateAsync ERROR] {ex}");
-                return new ServiceResult(500, "Error while creating station.", ex.Message);
-            }
+            return ServiceResponse.NotFound("Station not found.");
         }
 
-        // Update station
-        public async Task<ServiceResult> UpdateAsync(Guid id, StationCreateDTO dto)
+        _context.Stations.Remove(station);
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Station deleted successfully.");
+    }
+
+    public async Task<ServiceResult> SearchByNameAsync(string keyword)
+    {
+        if (string.IsNullOrWhiteSpace(keyword))
         {
-            try
-            {
-                var station = await _unitOfWork.StationRepository.GetByIdAsync(id);
-                if (station == null)
-                    return new ServiceResult(404, $"Station with ID = {id} not found.");
-
-                // Update each field if it has a value
-                if (!string.IsNullOrWhiteSpace(dto.Address))
-                    station.Address = dto.Address;
-                if (!string.IsNullOrWhiteSpace(dto.PhoneNumber))
-                    station.PhoneNumber = dto.PhoneNumber;
-                if (dto.Status != null)
-                    station.Status = dto.Status;
-                if (!string.IsNullOrWhiteSpace(dto.StationName))
-                    station.StationName = dto.StationName;
-                if (dto.BatteryQuantity != null)
-                    station.BatteryQuantity = dto.BatteryQuantity;
-
-                _unitOfWork.StationRepository.Update(station);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Station updated successfully.", station.ToDTO());
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while updating station.", ex.Message);
-            }
+            return ServiceResponse.BadRequest("Keyword is required.");
         }
 
-        // Soft delete (or normal delete)
-        public async Task<ServiceResult> DeleteAsync(Guid id)
+        var stations = await _unitOfWork.StationRepository.GetActiveStationsAsync(keyword: keyword);
+        return ServiceResponse.Ok("Stations retrieved successfully.", stations.Select(x => x.ToDto()).ToList());
+    }
+
+    public async Task<ServiceResult> GetByNameAsync(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
         {
-            try
-            {
-                var station = await _unitOfWork.StationRepository.GetByIdAsync(id);
-                if (station == null)
-                    return new ServiceResult(404, "Station not found for deletion.");
-
-                _unitOfWork.StationRepository.Delete(station);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Station deleted successfully.");
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while deleting station.", ex.Message);
-            }
+            return ServiceResponse.BadRequest("Station name is required.");
         }
 
-        // Hard delete
-        public async Task<ServiceResult> HardDeleteAsync(Guid id)
-        {
-            try
-            {
-                var station = await _unitOfWork.StationRepository.GetByIdAsync(id);
-                if (station == null)
-                    return new ServiceResult(404, "Station not found for permanent deletion.");
-
-                _unitOfWork.StationRepository.Delete(station);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Station permanently deleted successfully.");
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while permanently deleting station.", ex.Message);
-            }
-        }
+        var stations = await _unitOfWork.StationRepository.GetActiveStationsAsync(keyword: name);
+        var station = stations.FirstOrDefault(x => string.Equals(x.StationName, name.Trim(), StringComparison.OrdinalIgnoreCase));
+        return station is null
+            ? ServiceResponse.NotFound("Station not found.")
+            : ServiceResponse.Ok("Station retrieved successfully.", station.ToDto());
     }
 }

@@ -1,359 +1,209 @@
-﻿using EV_BatteryChangeStation_Common.DTOs.BookingDTO;
-using EV_BatteryChangeStation_Common.Enum.BookingEnum;
-using EV_BatteryChangeStation_Repository.Mapper;
+using EV_BatteryChangeStation_Common.DTOs.BookingDTO;
+using EV_BatteryChangeStation_Repository.DBContext;
+using EV_BatteryChangeStation_Repository.Entities;
 using EV_BatteryChangeStation_Repository.UnitOfWork;
 using EV_BatteryChangeStation_Service.Base;
 using EV_BatteryChangeStation_Service.InternalService.IService;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 
-namespace EV_BatteryChangeStation_Service.InternalService.Service
+namespace EV_BatteryChangeStation_Service.InternalService.Service;
+
+public sealed class BookingService : IBookingService
 {
-    public class BookingService : IBookingService
+    private readonly AppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
+
+    public BookingService(AppDbContext context, IUnitOfWork unitOfWork)
     {
-        private readonly IUnitOfWork _unitOfWork;
+        _context = context;
+        _unitOfWork = unitOfWork;
+    }
 
-        public BookingService(IUnitOfWork unitOfWork)
+    public async Task<ServiceResult> GetAllAsync()
+    {
+        var bookings = await _context.Bookings
+            .AsNoTracking()
+            .OrderByDescending(x => x.TargetTime)
+            .ToListAsync();
+
+        return ServiceResponse.Ok("Bookings retrieved successfully.", bookings.Select(x => x.ToDto()).ToList());
+    }
+
+    public async Task<ServiceResult> GetByIdAsync(Guid id)
+    {
+        var booking = await _unitOfWork.BookingRepository.GetByIdWithDetailsAsync(id);
+        return booking is null
+            ? ServiceResponse.NotFound("Booking not found.")
+            : ServiceResponse.Ok("Booking retrieved successfully.", booking.ToDetailDto());
+    }
+
+    public async Task<ServiceResult> GetByIdForAccountAsync(Guid bookingId, Guid accountId)
+    {
+        var booking = await _unitOfWork.BookingRepository.GetDriverBookingByIdAsync(bookingId, accountId);
+        return booking is null
+            ? ServiceResponse.NotFound("Booking not found.")
+            : ServiceResponse.Ok("Booking retrieved successfully.", booking.ToDetailDto());
+    }
+
+    public async Task<ServiceResult> CreateAsync(BookingCreateDTO dto)
+    {
+        var account = await _context.Accounts.AsNoTracking().FirstOrDefaultAsync(x => x.AccountId == dto.AccountId);
+        if (account is null)
         {
-            _unitOfWork = unitOfWork;
+            return ServiceResponse.NotFound("Account not found.");
         }
 
-        // Lấy tất cả booking (bao gồm cả đã hủy)
-        public async Task<ServiceResult> GetAllAsync()
+        var vehicle = await _unitOfWork.VehicleRepository.GetOwnedVehicleAsync(dto.VehicleId, dto.AccountId);
+        if (vehicle?.Model?.BatteryTypeId is not Guid requestedBatteryTypeId)
         {
-            try
-            {
-                var bookings = await _unitOfWork.BookingRepository.GetAllAsync();
-                var result = bookings.Select(BookingMapper.ToDTO).ToList();
-
-                return new ServiceResult(200, "Success", result, BookingErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error fetching bookings", new List<string> { ex.Message }, BookingErrorCode.DatabaseError);
-            }
+            return ServiceResponse.NotFound("Vehicle or compatible battery type not found.");
         }
 
-        // Lấy booking theo ID
-        public async Task<ServiceResult> GetByIdAsync(Guid id)
+        var stationExists = await _context.Stations.AnyAsync(x => x.StationId == dto.StationId && x.Status == "ACTIVE");
+        if (!stationExists)
         {
-            try
-            {
-                var booking = await _unitOfWork.BookingRepository.GetByIdAsync(id);
-                if (booking == null)
-                    return new ServiceResult(404, "Booking not found", null, BookingErrorCode.BookingNotFound);
-
-                return new ServiceResult(200, "Success", BookingMapper.ToDTO(booking), BookingErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error fetching booking", new List<string> { ex.Message }, BookingErrorCode.UnexpectedError);
-            }
+            return ServiceResponse.NotFound("Station not found.");
         }
 
-        public async Task<ServiceResult> GetByIdForAccountAsync(Guid bookingId, Guid accountId)
+        var hasBattery = await _unitOfWork.BatteryRepository.HasAvailableCompatibleBatteryAsync(dto.StationId, requestedBatteryTypeId);
+        if (!hasBattery)
         {
-            try
-            {
-                var booking = await _unitOfWork.BookingRepository.GetByIdAsync(bookingId);
-                if (booking == null)
-                {
-                    return new ServiceResult(404, "Booking not found", null, BookingErrorCode.BookingNotFound);
-                }
-
-                if (booking.AccountId != accountId)
-                {
-                    return new ServiceResult(403, "You can only access your own bookings", null, BookingErrorCode.BookingNotFound);
-                }
-
-                return new ServiceResult(200, "Success", BookingMapper.ToDTO(booking), BookingErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error fetching booking", new List<string> { ex.Message }, BookingErrorCode.UnexpectedError);
-            }
+            return ServiceResponse.Conflict("No compatible battery available at this station.");
         }
 
-        // Tạo booking mới
-        public async Task<ServiceResult> CreateAsync(BookingCreateDTO dto)
+        var hasConflict = await _unitOfWork.BookingRepository.ExistsConflictingBookingAsync(dto.StationId, dto.VehicleId, dto.DateTime);
+        if (hasConflict)
         {
-            try
-            {
-                if (dto == null)
-                    return new ServiceResult(400, "Booking data is missing", null, BookingErrorCode.MissingRequiredField);
-
-                if (dto.DateTime < DateTime.Now)
-                    return new ServiceResult(400, "Booking time cannot be in the past", null, BookingErrorCode.TimeInPast);
-
-                // Kiểm tra user có payment thành công với subscription active không
-                // Logic: Kiểm tra qua Payment thay vì Subscription trực tiếp
-                var activePayment = await _unitOfWork.PaymentRepository.GetActiveSubscriptionPaymentByAccountIdAsync(dto.AccountId);
-                if (activePayment == null || activePayment.Subscription == null)
-                {
-                    return new ServiceResult(400, "You must have an active subscription to create a booking. Please purchase a subscription first.", null, BookingErrorCode.MissingRequiredField);
-                }
-
-                var subscription = activePayment.Subscription;
-
-                // Kiểm tra subscription còn hiệu lực (đã được check trong GetActiveSubscriptionPaymentByAccountIdAsync nhưng double check)
-                if (subscription.EndDate.HasValue && subscription.EndDate < DateTime.Now)
-                {
-                    return new ServiceResult(400, "Your subscription has expired. Please renew your subscription.", null, BookingErrorCode.MissingRequiredField);
-                }
-
-                // Kiểm tra còn lượt swap không (nếu có giới hạn)
-                if (subscription.RemainingSwaps.HasValue && subscription.RemainingSwaps <= 0)
-                {
-                    return new ServiceResult(400, "You have no remaining swaps in your subscription. Please renew your subscription.", null, BookingErrorCode.MissingRequiredField);
-                }
-
-                var existing = (await _unitOfWork.BookingRepository.GetAllAsync())
-                    .FirstOrDefault(b => b.StationId == dto.StationId &&
-                                         b.DateTime == dto.DateTime);
-
-                if (existing != null)
-                    return new ServiceResult(409, "Duplicate booking for this time slot", null, BookingErrorCode.DuplicateBooking);
-
-                var batteryAssignment = await TryAssignBatteryAsync(dto.StationId, dto.VehicleId);
-                if (!batteryAssignment.IsSuccess)
-                {
-                    return batteryAssignment.ErrorResult;
-                }
-                dto.BatteryId = batteryAssignment.BatteryId;
-
-                var entity = BookingMapper.ToEntity(dto);
-                entity.CreatedDate = DateTime.Now;
-                entity.IsApproved = Convert.ToString(BookingApprovalStatus.Pending);
-
-                await _unitOfWork.BookingRepository.AddAsync(entity);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(201, "Booking created successfully", BookingMapper.ToDTO(entity), BookingErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error creating booking", new List<string> { ex.Message }, BookingErrorCode.TransactionFailed);
-            }
+            return ServiceResponse.Conflict("This vehicle already has a nearby booking at the selected time.");
         }
 
-        // Cập nhật booking (nếu chưa bị hủy)
-        public async Task<ServiceResult> UpdateAsync(Guid id, BookingCreateDTO dto)
+        var subscription = await _unitOfWork.SubscriptionRepository.GetActiveForBookingAsync(dto.AccountId, dto.VehicleId, dto.DateTime);
+        if (subscription is null)
         {
-            try
-            {
-                var existing = await _unitOfWork.BookingRepository.GetByIdAsync(id);
-                if (existing == null)
-                    return new ServiceResult(404, "Booking not found", null, BookingErrorCode.BookingNotFound);
-
-                if (existing.IsApproved == Convert.ToString(BookingApprovalStatus.Canceled))
-                    return new ServiceResult(400, "Cannot update a cancelled booking", null, BookingErrorCode.BookingAlreadyCancelled);
-
-                var batteryAssignment = await TryAssignBatteryAsync(dto.StationId, dto.VehicleId);
-                if (!batteryAssignment.IsSuccess)
-                {
-                    return batteryAssignment.ErrorResult;
-                }
-                dto.BatteryId = batteryAssignment.BatteryId;
-
-                BookingMapper.UpdateEntity(existing, dto);
-                _unitOfWork.BookingRepository.Update(existing);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Booking updated successfully", BookingMapper.ToDTO(existing), BookingErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error updating booking", new List<string> { ex.Message }, BookingErrorCode.DatabaseError);
-            }
+            return ServiceResponse.Forbidden("An active subscription is required for booking.");
         }
 
-        // Soft delete — chuyển trạng thái thành Canceled
-        public async Task<ServiceResult> DeleteAsync(Guid id)
+        var booking = new Booking
         {
-            try
-            {
-                var existing = await _unitOfWork.BookingRepository.GetByIdAsync(id);
-                if (existing == null)
-                    return new ServiceResult(404, "Booking not found", null, BookingErrorCode.BookingNotFound);
+            BookingId = Guid.NewGuid(),
+            AccountId = dto.AccountId,
+            VehicleId = dto.VehicleId,
+            StationId = dto.StationId,
+            RequestedBatteryTypeId = requestedBatteryTypeId,
+            TargetTime = dto.DateTime,
+            Status = string.IsNullOrWhiteSpace(dto.IsApproved) ? "PENDING" : dto.IsApproved.Trim().ToUpperInvariant(),
+            Notes = dto.Notes?.Trim(),
+            CreateDate = dto.CreatedDate ?? DateTime.UtcNow
+        };
 
-                if (existing.IsApproved == Convert.ToString(BookingApprovalStatus.Canceled))
-                    return new ServiceResult(400, "Booking is already cancelled", null, BookingErrorCode.BookingAlreadyCancelled);
+        _context.Bookings.Add(booking);
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Created("Booking created successfully.", booking.ToDto());
+    }
 
-                existing.IsApproved = Convert.ToString(BookingApprovalStatus.Canceled);
-                _unitOfWork.BookingRepository.Update(existing);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Booking cancelled successfully", null, BookingErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error cancelling booking", new List<string> { ex.Message }, BookingErrorCode.TransactionFailed);
-            }
+    public async Task<ServiceResult> UpdateAsync(Guid id, BookingCreateDTO dto)
+    {
+        var booking = await _context.Bookings.FirstOrDefaultAsync(x => x.BookingId == id);
+        if (booking is null)
+        {
+            return ServiceResponse.NotFound("Booking not found.");
         }
 
-        // Hard delete — xóa khỏi DB
-        public async Task<ServiceResult> HardDeleteAsync(Guid id)
+        if (booking.Status == "COMPLETED")
         {
-            try
-            {
-                var existing = await _unitOfWork.BookingRepository.GetByIdAsync(id);
-                if (existing == null)
-                    return new ServiceResult(404, "Booking not found for hard delete", null, BookingErrorCode.BookingNotFound);
-
-                _unitOfWork.BookingRepository.Delete(existing);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Booking permanently deleted", null, BookingErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error permanently deleting booking", new List<string> { ex.Message }, BookingErrorCode.DatabaseError);
-            }
+            return ServiceResponse.BadRequest("Completed bookings cannot be updated.");
         }
 
-        // Lấy tất cả booking theo AccountId
-        public async Task<ServiceResult> GetByAccountIdAsync(Guid accountId)
+        booking.TargetTime = dto.DateTime;
+        booking.Notes = dto.Notes?.Trim();
+        booking.UpdateDate = DateTime.UtcNow;
+        if (dto.StationId != Guid.Empty)
         {
-            try
-            {
-                var bookings = await _unitOfWork.BookingRepository.GetByAccountIdAsync(accountId);
-                if (bookings == null || !bookings.Any())
-                    return new ServiceResult(404, "No bookings found for this user", null, BookingErrorCode.BookingNotFound);
-
-                var result = bookings.Select(BookingMapper.ToDTO).ToList();
-                return new ServiceResult(200, "Success", result, BookingErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error fetching user bookings", new List<string> { ex.Message }, BookingErrorCode.DatabaseError);
-            }
+            booking.StationId = dto.StationId;
         }
 
-        // Hiển<Task>: Lấy booking theo Station của Staff - Validate Role và StationID
-        // Lấy booking theo Station của Staff
-        public async Task<ServiceResult> GetByStaffStationAsync(Guid staffAccountId)
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Booking updated successfully.", booking.ToDto());
+    }
+
+    public async Task<ServiceResult> DeleteAsync(Guid id)
+    {
+        var booking = await _context.Bookings.FirstOrDefaultAsync(x => x.BookingId == id);
+        if (booking is null)
         {
-            try
-            {
-                // 1. Lấy Account của Staff (có Include Role và Station)
-                var staff = await _unitOfWork.AccountRepository.GetAllWithRoleAndStation(staffAccountId);
-                if (staff == null)
-                    return new ServiceResult(404, "Staff not found", null, BookingErrorCode.BookingNotFound);
-
-                // 2. Validate: Phải là Staff
-                if (staff.Role?.RoleName != "Staff")
-                    return new ServiceResult(403, "Only Staff can access this endpoint", null, BookingErrorCode.BookingNotFound);
-
-                // 3. Validate: Staff phải có StationID
-                if (staff.StationId == null)
-                    return new ServiceResult(400, "Staff is not assigned to any station", null, BookingErrorCode.BookingNotFound);
-
-                // 4. Lấy Booking theo StationID
-                var stationId = staff.StationId.Value;
-                var bookings = await _unitOfWork.BookingRepository.GetByStationIdAsync(stationId);
-                
-                if (bookings == null || !bookings.Any())
-                    return new ServiceResult(404, "No bookings found for this station", null, BookingErrorCode.BookingNotFound);
-
-                // 5. Map sang DTO và trả về
-                var result = bookings.Select(BookingMapper.ToDTO).ToList();
-                return new ServiceResult(200, "Success", result, BookingErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error fetching bookings", new List<string> { ex.Message }, BookingErrorCode.DatabaseError);
-            }
+            return ServiceResponse.NotFound("Booking not found.");
         }
 
-        /// <summary>
-        /// Staff xác nhận hoặc từ chối booking (chuyển trạng thái Pending → Approved/Rejected)
-        /// </summary>
-        public async Task<ServiceResult> UpdateBookingStatusAsync(Guid bookingId, string status, Guid staffId, string? notes = null)
+        booking.Status = "CANCELLED";
+        booking.CancelledDate = DateTime.UtcNow;
+        booking.UpdateDate = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Booking cancelled successfully.");
+    }
+
+    public async Task<ServiceResult> HardDeleteAsync(Guid id)
+    {
+        var booking = await _context.Bookings.FirstOrDefaultAsync(x => x.BookingId == id);
+        if (booking is null)
         {
-            try
-            {
-                // 1. Validate status phải là Approved hoặc Rejected
-                if (status != "Approved" && status != "Rejected")
-                {
-                    return new ServiceResult(400, "Status must be 'Approved' or 'Rejected'", null, BookingErrorCode.MissingRequiredField);
-                }
-
-                // 2. Kiểm tra Staff có tồn tại và có quyền không
-                var staff = await _unitOfWork.AccountRepository.GetAllWithRoleAndStation(staffId);
-                if (staff == null)
-                {
-                    return new ServiceResult(404, "Staff not found", null, BookingErrorCode.BookingNotFound);
-                }
-
-                if (staff.Role?.RoleName != "Staff")
-                {
-                    return new ServiceResult(403, "Only Staff can approve/reject bookings", null, BookingErrorCode.BookingNotFound);
-                }
-
-                // 3. Lấy thông tin Booking
-                var booking = await _unitOfWork.BookingRepository.GetByIdAsync(bookingId);
-                if (booking == null)
-                {
-                    return new ServiceResult(404, "Booking not found", null, BookingErrorCode.BookingNotFound);
-                }
-
-                // 4. Kiểm tra Staff có thuộc Station của Booking không
-                if (staff.StationId != booking.StationId)
-                {
-                    return new ServiceResult(403, "Staff can only process bookings at their assigned station", null, BookingErrorCode.BookingNotFound);
-                }
-
-                // 5. Kiểm tra trạng thái Booking phải là Pending
-                if (booking.IsApproved != "Pending")
-                {
-                    return new ServiceResult(400, $"Cannot update booking with status '{booking.IsApproved}'. Only 'Pending' bookings can be approved/rejected.", null, BookingErrorCode.BookingAlreadyCancelled);
-                }
-
-                // 6. Cập nhật trạng thái Booking
-                booking.IsApproved = status;
-                if (!string.IsNullOrEmpty(notes))
-                {
-                    booking.Notes = string.IsNullOrEmpty(booking.Notes) 
-                        ? notes 
-                        : $"{booking.Notes}\n[Staff Note]: {notes}";
-                }
-
-                _unitOfWork.BookingRepository.Update(booking);
-                await _unitOfWork.CommitAsync();
-
-                var message = status == "Approved" 
-                    ? "Booking approved successfully" 
-                    : "Booking rejected successfully";
-
-                return new ServiceResult(200, message, BookingMapper.ToDTO(booking), BookingErrorCode.None);
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error updating booking status", new List<string> { ex.Message }, BookingErrorCode.DatabaseError);
-            }
+            return ServiceResponse.NotFound("Booking not found.");
         }
 
-        private async Task<(bool IsSuccess, Guid BatteryId, ServiceResult ErrorResult)> TryAssignBatteryAsync(Guid stationId, Guid vehicleId)
+        _context.Bookings.Remove(booking);
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Booking deleted successfully.");
+    }
+
+    public async Task<ServiceResult> GetByAccountIdAsync(Guid accountId)
+    {
+        var bookings = await _unitOfWork.BookingRepository.GetBookingsByAccountAsync(accountId);
+        return ServiceResponse.Ok("Bookings retrieved successfully.", bookings.Select(x => x.ToDetailDto()).ToList());
+    }
+
+    public async Task<ServiceResult> GetByStaffStationAsync(Guid staffAccountId)
+    {
+        var stationId = await _unitOfWork.StationRepository.GetAssignedStationIdAsync(staffAccountId);
+        if (!stationId.HasValue)
         {
-            var car = await _unitOfWork.CarRepository.GetByIdAsync(vehicleId);
-            if (car == null)
-            {
-                return (false,
-                        Guid.Empty,
-                        new ServiceResult(404, "Vehicle not found", null, BookingErrorCode.VehicleNotFound));
-            }
-
-            var battery = await _unitOfWork.BatteryRepository.GetAvailableBatteryAsync(stationId, car.BatteryType);
-            if (battery == null)
-            {
-                return (false,
-                        Guid.Empty,
-                        new ServiceResult(404, "No available battery matches this vehicle at the station", null, BookingErrorCode.StationNotAvailable));
-            }
-
-            return (true, battery.BatteryId, null);
+            return ServiceResponse.NotFound("Staff is not assigned to any station.");
         }
+
+        var bookings = await _unitOfWork.BookingRepository.GetBookingsByStationAsync(stationId.Value);
+        return ServiceResponse.Ok("Station bookings retrieved successfully.", bookings.Select(x => x.ToDetailDto()).ToList());
+    }
+
+    public async Task<ServiceResult> UpdateBookingStatusAsync(Guid bookingId, string status, Guid staffId, string? notes = null)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return ServiceResponse.BadRequest("Status is required.");
+        }
+
+        var normalizedStatus = status.Trim().ToUpperInvariant();
+        if (normalizedStatus is not ("APPROVED" or "REJECTED"))
+        {
+            return ServiceResponse.BadRequest("Status must be Approved or Rejected.");
+        }
+
+        var booking = await _context.Bookings.FirstOrDefaultAsync(x => x.BookingId == bookingId);
+        if (booking is null)
+        {
+            return ServiceResponse.NotFound("Booking not found.");
+        }
+
+        var stationId = await _unitOfWork.StationRepository.GetAssignedStationIdAsync(staffId);
+        if (!stationId.HasValue || stationId.Value != booking.StationId)
+        {
+            return ServiceResponse.Forbidden("You can only manage bookings at your assigned station.");
+        }
+
+        booking.Status = normalizedStatus;
+        booking.StaffNote = notes?.Trim();
+        booking.ApprovedBy = normalizedStatus == "APPROVED" ? staffId : null;
+        booking.ApprovedDate = normalizedStatus == "APPROVED" ? DateTime.UtcNow : null;
+        booking.UpdateDate = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Booking status updated successfully.", booking.ToDto());
     }
 }

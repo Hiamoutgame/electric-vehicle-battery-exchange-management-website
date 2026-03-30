@@ -1,3 +1,4 @@
+using EV_BatteryChangeStation_Repository.DBContext;
 using EV_BatteryChangeStation_Repository.Entities;
 using EV_BatteryChangeStation_Repository.UnitOfWork;
 using EV_BatteryChangeStation_Service.ExternalService.IService;
@@ -14,8 +15,22 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
     {
-        services.AddDbContext<EVBatterySwapContext>(options =>
-            options.UseSqlServer(configuration.GetConnectionString("DefaultConnection")));
+        services.AddDbContext<AppDbContext>(options =>
+        {
+            var postgresConnection = configuration.GetConnectionString("PostgresConnection")
+                ?? configuration.GetConnectionString("PostgresV2Connection");
+
+            if (!string.IsNullOrWhiteSpace(postgresConnection))
+            {
+                options.UseNpgsql(postgresConnection);
+                return;
+            }
+
+            var sqlServerConnection = configuration.GetConnectionString("DefaultConnection")
+                ?? configuration.GetConnectionString("V2Connection");
+
+            options.UseSqlServer(sqlServerConnection);
+        });
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 

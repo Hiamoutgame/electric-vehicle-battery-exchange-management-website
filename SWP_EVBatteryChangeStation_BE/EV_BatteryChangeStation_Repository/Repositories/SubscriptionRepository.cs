@@ -1,63 +1,88 @@
-﻿
+﻿using EV_BatteryChangeStation_Repository.DBContext;
 using EV_BatteryChangeStation_Repository.Entities;
 using EV_BatteryChangeStation_Repository.IRepositories;
 using Microsoft.EntityFrameworkCore;
-using System.Collections.Generic;
-using System;
-using System.Threading.Tasks;
 
-namespace EV_BatteryChangeStation_Repository.Repositories
+namespace EV_BatteryChangeStation_Repository.Repositories;
+
+public sealed class SubscriptionRepository : ISubscriptionRepository
 {
-    public class SubscriptionRepository : ISubscriptionRepository
+    private readonly AppDbContext _context;
+
+    public SubscriptionRepository(AppDbContext context)
     {
-        private readonly EVBatterySwapContext _context;
+        _context = context;
+    }
 
-        public SubscriptionRepository(EVBatterySwapContext context)
+    public Task<UserSubscription?> GetActiveByAccountAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+
+        return _context.UserSubscriptions
+            .AsNoTracking()
+            .Include(x => x.Plan)
+            .Include(x => x.Vehicle)
+                .ThenInclude(x => x!.Model)
+                    .ThenInclude(x => x!.BatteryType)
+            .Where(x => x.AccountId == accountId
+                        && x.Status == "ACTIVE"
+                        && x.StartDate <= now
+                        && x.EndDate >= now)
+            .OrderByDescending(x => x.StartDate)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public Task<UserSubscription?> GetActiveByVehicleAsync(Guid vehicleId, CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+
+        return _context.UserSubscriptions
+            .AsNoTracking()
+            .Include(x => x.Plan)
+            .Include(x => x.Account)
+            .Where(x => x.VehicleId == vehicleId
+                        && x.Status == "ACTIVE"
+                        && x.StartDate <= now
+                        && x.EndDate >= now)
+            .OrderByDescending(x => x.StartDate)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public Task<UserSubscription?> GetActiveForBookingAsync(Guid accountId, Guid vehicleId, DateTime targetTime, CancellationToken cancellationToken = default)
+    {
+        return _context.UserSubscriptions
+            .AsNoTracking()
+            .Include(x => x.Plan)
+            .Where(x => x.AccountId == accountId
+                        && x.VehicleId == vehicleId
+                        && x.Status == "ACTIVE"
+                        && x.StartDate <= targetTime
+                        && x.EndDate >= targetTime
+                        && (!x.RemainingSwaps.HasValue || x.RemainingSwaps > 0))
+            .OrderByDescending(x => x.StartDate)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public Task<SubscriptionPlan?> GetPlanByIdAsync(Guid planId, CancellationToken cancellationToken = default)
+    {
+        return _context.SubscriptionPlans
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.PlanId == planId, cancellationToken);
+    }
+
+    public Task<List<SubscriptionPlan>> GetPlansAsync(string? status = null, CancellationToken cancellationToken = default)
+    {
+        IQueryable<SubscriptionPlan> query = _context.SubscriptionPlans.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status.Trim(), "ALL", StringComparison.OrdinalIgnoreCase))
         {
-            _context = context;
+            var normalizedStatus = status.Trim().ToUpperInvariant();
+            query = query.Where(x => x.Status.ToUpper() == normalizedStatus);
         }
 
-        public async Task<List<Subscription>> GetAllAsync()
-        {
-            return await _context.Subscriptions.ToListAsync();
-        }
-
-        public async Task<Subscription?> GetByIdAsync(Guid id)
-        {
-            return await _context.Subscriptions.FirstOrDefaultAsync(x => x.SubscriptionId == id);
-        }
-
-        public async Task AddAsync(Subscription entity)
-        {
-            await _context.Subscriptions.AddAsync(entity);
-        }
-
-        public void Update(Subscription entity)
-        {
-            _context.Subscriptions.Update(entity);
-        }
-
-        public void Delete(Subscription entity)
-        {
-            _context.Subscriptions.Remove(entity);
-        }
-
-        /// <summary>
-        /// Lấy gói đang hoạt động của một Account,
-        /// thỏa điều kiện: IsActive = true, còn hạn (StartDate/EndDate)
-        /// và còn lượt swap (RemainingSwaps > 0) nếu gói có giới hạn lượt.
-        /// </summary>
-        public async Task<Subscription?> GetActiveByAccountIdAsync(Guid accountId)
-        {
-            var now = DateTime.Now;
-
-            return await _context.Subscriptions
-                .FirstOrDefaultAsync(s =>
-                    s.AccountId == accountId &&
-                    s.IsActive == true &&
-                    (s.StartDate == null || s.StartDate <= now) &&
-                    (s.EndDate == null || s.EndDate >= now) &&
-                    (!s.RemainingSwaps.HasValue || s.RemainingSwaps > 0));
-        }
+        return query
+            .OrderBy(x => x.PlanName)
+            .ToListAsync(cancellationToken);
     }
 }
+

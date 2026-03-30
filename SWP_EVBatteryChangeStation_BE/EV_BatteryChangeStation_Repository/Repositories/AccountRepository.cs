@@ -1,74 +1,122 @@
-﻿using EV_BatteryChangeStation_Repository.Base;
-using EV_BatteryChangeStation_Repository.Entities;  
+﻿using EV_BatteryChangeStation_Repository.DBContext;
+using EV_BatteryChangeStation_Repository.Entities;
 using EV_BatteryChangeStation_Repository.IRepositories;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace EV_BatteryChangeStation_Repository.Repositories
+namespace EV_BatteryChangeStation_Repository.Repositories;
+
+public sealed class AccountRepository : IAccountRepository
 {
-    public class AccountRepository : GenericRepository<Account>, IAccountReporitory
+    private readonly AppDbContext _context;
+
+    public AccountRepository(AppDbContext context)
     {
-        public AccountRepository() {}
+        _context = context;
+    }
 
-        public AccountRepository(EVBatterySwapContext context) => _context = context;
+    public Task<Account?> GetByIdWithRoleAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        return _context.Accounts
+            .AsNoTracking()
+            .Include(x => x.Role)
+            .Include(x => x.StationAssignments)
+                .ThenInclude(x => x.Station)
+            .FirstOrDefaultAsync(x => x.AccountId == accountId, cancellationToken);
+    }
 
-        public async Task<List<Account>> GetAccountByAccountName(string accountName)
+    public Task<Account?> GetByEmailWithRoleAsync(string email, CancellationToken cancellationToken = default)
+    {
+        var normalizedEmail = email.Trim();
+
+        return _context.Accounts
+            .AsNoTracking()
+            .Include(x => x.Role)
+            .FirstOrDefaultAsync(x => x.Email == normalizedEmail, cancellationToken);
+    }
+
+    public Task<Account?> GetByUsernameWithRoleAsync(string username, CancellationToken cancellationToken = default)
+    {
+        var normalizedUsername = username.Trim();
+
+        return _context.Accounts
+            .AsNoTracking()
+            .Include(x => x.Role)
+            .FirstOrDefaultAsync(x => x.Username == normalizedUsername, cancellationToken);
+    }
+
+    public Task<List<Account>> GetAccountsAsync(string? roleName = null, string? status = null, string? keyword = null, CancellationToken cancellationToken = default)
+    {
+        IQueryable<Account> query = _context.Accounts
+            .AsNoTracking()
+            .Include(x => x.Role)
+            .Include(x => x.StationAssignments)
+                .ThenInclude(x => x.Station);
+
+        if (!string.IsNullOrWhiteSpace(roleName))
         {
-            return await _context.Accounts
-                    .Include(r => r.Role)
-                    .Where(a => a.AccountName.Contains(accountName.ToLower()))
-                    .ToListAsync();
-        }
-        public async Task<Account> GetAccountByEmail(string email)
-        {
-            return await _context.Accounts.Include(r => r.Role)
-                .FirstOrDefaultAsync(a => a.Email == email);
-        }
-        public async Task<Account> GetAccountByPhoneAsync(string phone)
-        {
-            return await _context.Accounts.Include(r => r.Role)
-                .FirstOrDefaultAsync(a => a.PhoneNumber == phone);
-        }
-        public async Task<Account> GetAllAccount()
-        {
-            return await _context.Accounts.Include(r => r.Role)
-                .FirstOrDefaultAsync();
-        }
-        public async Task<List<Account>> GetAllWithRoleAsync()
-        {
-            return await _context.Accounts.Include(r => r.Role)
-                .ToListAsync();
-        }
-        public async Task<Account?> GetAllWithRoleAndStation(Guid id)
-        {
-            return await _context.Accounts
-                .Include(r => r.Role)
-                .Include(s => s.Station)
-                .FirstOrDefaultAsync(a => a.AccountId == id);
+            var normalizedRole = roleName.Trim().ToUpperInvariant();
+            query = query.Where(x => x.Role != null && x.Role.RoleName.ToUpper() == normalizedRole);
         }
 
-        public async Task<Account?> GetByAccountNameOrEmail(string keyword)
+        if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status.Trim(), "ALL", StringComparison.OrdinalIgnoreCase))
         {
-            return await _context.Accounts
-                .Include(r => r.Role)
-                .FirstOrDefaultAsync(a => a.AccountName.ToLower() == keyword || a.Email.ToLower() == keyword);
+            var normalizedStatus = status.Trim().ToUpperInvariant();
+            query = query.Where(x => x.Status.ToUpper() == normalizedStatus);
         }
 
-        public async Task<Account?> FindAsync(Expression<Func<Account, bool>> predicate)
+        if (!string.IsNullOrWhiteSpace(keyword))
         {
-            return await _context.Accounts.FirstOrDefaultAsync(predicate);
+            var pattern = $"%{keyword.Trim().ToUpperInvariant()}%";
+            query = query.Where(x =>
+                EF.Functions.Like(x.Username.ToUpper(), pattern) ||
+                EF.Functions.Like(x.Email.ToUpper(), pattern) ||
+                (x.FullName != null && EF.Functions.Like(x.FullName.ToUpper(), pattern)) ||
+                (x.PhoneNumber != null && EF.Functions.Like(x.PhoneNumber.ToUpper(), pattern)));
         }
-        public async Task<List<Account>> GetAllStaffAsync()
-        {
-            return await _context.Accounts
-                .Include(r => r.Role)
-                .Where(a => a.Role.RoleName == "Staff")
-                .ToListAsync();
-        }
+
+        return query
+            .AsSplitQuery()
+            .OrderBy(x => x.FullName ?? x.Username)
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<StationStaffAssignment?> GetActiveStaffAssignmentAsync(Guid staffId, DateOnly? effectiveDate = null, CancellationToken cancellationToken = default)
+    {
+        var targetDate = effectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+
+        return _context.StationStaffAssignments
+            .AsNoTracking()
+            .Include(x => x.Station)
+            .Include(x => x.Staff)
+            .Where(x => x.StaffId == staffId
+                        && x.Status == "ACTIVE"
+                        && x.EffectiveFrom <= targetDate
+                        && (x.EffectiveTo == null || x.EffectiveTo >= targetDate))
+            .OrderByDescending(x => x.EffectiveFrom)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public Task<bool> EmailExistsAsync(string email, Guid? excludeAccountId = null, CancellationToken cancellationToken = default)
+    {
+        var normalizedEmail = email.Trim();
+
+        return _context.Accounts
+            .AsNoTracking()
+            .AnyAsync(x => x.Email == normalizedEmail
+                           && (!excludeAccountId.HasValue || x.AccountId != excludeAccountId.Value),
+                cancellationToken);
+    }
+
+    public Task<bool> UsernameExistsAsync(string username, Guid? excludeAccountId = null, CancellationToken cancellationToken = default)
+    {
+        var normalizedUsername = username.Trim();
+
+        return _context.Accounts
+            .AsNoTracking()
+            .AnyAsync(x => x.Username == normalizedUsername
+                           && (!excludeAccountId.HasValue || x.AccountId != excludeAccountId.Value),
+                cancellationToken);
     }
 }
+
+

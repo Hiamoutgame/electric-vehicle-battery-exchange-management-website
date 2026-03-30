@@ -1,20 +1,15 @@
-﻿using EV_BatteryChangeStation_Repository.Base;
-using EV_BatteryChangeStation_Repository.Entities;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using EV_BatteryChangeStation_Repository.Entities;
+using EV_BatteryChangeStation_Repository.Models;
 
-namespace EV_BatteryChangeStation_Repository.IRepositories
+namespace EV_BatteryChangeStation_Repository.IRepositories;
+
+public interface IBatteryRepository
 {
-    public interface IBatteryRepository : IGenericRepository<Battery>
-    {
-        Task<int?> GetBatteryCountByStationId(Guid stationId);
-        Task<bool?> IsBatteryAvailable(Guid batteryId);
-        Task<List<Battery>> GetBatteryByStationId(Guid stationId); 
-        Task<List<Battery>> GetAllBattery();
-        Task<List<Battery?>> GetBatteriesByType(string typeBattery);
-        Task<Battery?> GetAvailableBatteryAsync(Guid stationId, string typeBattery);
-    }
+    Task<Battery?> GetByIdAsync(Guid batteryId, CancellationToken cancellationToken = default);
+    Task<Battery?> GetBestAvailableBatteryAsync(Guid stationId, Guid batteryTypeId, CancellationToken cancellationToken = default);
+    Task<bool> HasAvailableCompatibleBatteryAsync(Guid stationId, Guid batteryTypeId, CancellationToken cancellationToken = default);
+    Task<Dictionary<Guid, int>> GetAvailableCountsByStationAsync(Guid? batteryTypeId = null, CancellationToken cancellationToken = default);
+    Task<List<Battery>> GetStationInventoryAsync(Guid stationId, string? status = null, Guid? batteryTypeId = null, CancellationToken cancellationToken = default);
+    Task<List<StationInventorySummary>> GetInventorySummaryAsync(Guid? stationId = null, Guid? batteryTypeId = null, CancellationToken cancellationToken = default);
 }
+

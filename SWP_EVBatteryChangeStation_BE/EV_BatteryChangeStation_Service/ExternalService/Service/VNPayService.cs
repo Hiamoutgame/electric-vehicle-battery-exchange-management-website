@@ -1,203 +1,105 @@
-﻿using EV_BatteryChangeStation_Common.Enum.PaymentEnum;
-using EV_BatteryChangeStation_Common.Enum.ServiceResult;
-using EV_BatteryChangeStation_Repository.Mapper;
-using EV_BatteryChangeStation_Repository.UnitOfWork;
 using EV_BatteryChangeStation_Service.Base;
 using EV_BatteryChangeStation_Service.ExternalService.IService;
+using EV_BatteryChangeStation_Repository.DBContext;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using VNPAY.NET;
 using VNPAY.NET.Enums;
 using VNPAY.NET.Models;
 
-namespace EV_BatteryChangeStation_Service.ExternalService.Service
+namespace EV_BatteryChangeStation_Service.ExternalService.Service;
+
+public sealed class VNPayService : IVNPayService
 {
-    public class VNPayService : IVNPayService
+    private readonly AppDbContext _context;
+    private readonly IConfiguration _configuration;
+    private readonly IVnpay _vnPay;
+
+    public VNPayService(IVnpay vnPay, IConfiguration configuration, AppDbContext context)
     {
-        private readonly IVnpay _vnPay;
-        private readonly IConfiguration _configuration;
-        private readonly IUnitOfWork _unitOfWork;
+        _vnPay = vnPay;
+        _configuration = configuration;
+        _context = context;
 
-        public VNPayService(IVnpay vnPay, IConfiguration configuration, IUnitOfWork unitOfWork)
+        var tmnCode = _configuration["Vnpay:TmnCode"] ?? string.Empty;
+        var hashSecret = _configuration["Vnpay:HashSecret"] ?? string.Empty;
+        var baseUrl = _configuration["Vnpay:BaseUrl"] ?? string.Empty;
+        var returnUrl = _configuration["Vnpay:ReturnUrl"] ?? string.Empty;
+
+        _vnPay.Initialize(
+            tmnCode,
+            hashSecret,
+            baseUrl,
+            returnUrl);
+    }
+
+    public async Task<IServiceResult> CreatePaymentURL(Guid payment, string ipAddress)
+    {
+        var transaction = await _context.Payments.FirstOrDefaultAsync(x => x.PaymentId == payment);
+        if (transaction is null)
         {
-            _vnPay = vnPay;
-            _configuration = configuration;
-            _unitOfWork = unitOfWork;
-            _vnPay.Initialize(
-                _configuration["Vnpay:TmnCode"],
-                _configuration["Vnpay:HashSecret"],
-                _configuration["Vnpay:BaseUrl"],
-                _configuration["Vnpay:ReturnUrl"]
-            );
+            return new ServiceResult(404, "Payment not found.");
         }
 
-        public async Task<IServiceResult> CreatePaymentURL(Guid payment, string ipAddress)
+        if (transaction.Status == "PAID")
         {
-            try
-            {
-                using var scop = await _unitOfWork.BeginTransactionAsync();
-                try
-                {
-                    var payment1 = await _unitOfWork.PaymentRepository.GetByIdAsync(payment);
-                    if (payment1 == null)
-                    {
-                        return new ServiceResult
-                        {
-                            Status = Const.FAIL_READ_CODE,
-                            Message = "Payment transaction not found",
-                            Data = null
-                        };
-                    }
-                    if (payment1.Status == PaymentEnum.Successful.ToString())
-                    {
-                        return new ServiceResult
-                        {
-                            Status = Const.FAIL_CREATE_CODE,
-                            Message = "Payment already successful. Cannot create VNPay URL.",
-                            Data = null
-                        };
-                    }
-                    var request = new PaymentRequest
-                    {
-                        PaymentId = payment1.PaymentGateId.Value,
-                        Money = Convert.ToDouble(payment1.Price),
-                        Description = "payment for transaction ",
-                        IpAddress = ipAddress,
-                        BankCode = BankCode.ANY,
-                        CreatedDate = DateTime.Now.AddMinutes(20),
-                        Currency = Currency.VND,
-                        Language = DisplayLanguage.Vietnamese,
-                    };
-
-                    var paymentUrl = _vnPay.GetPaymentUrl(request);
-                    await scop.CommitAsync();
-
-                    return new ServiceResult(Const.SUCCESS_CREATE_CODE, "Create payment URL success", paymentUrl);
-                }
-                catch (Exception ex)
-                {
-                    await scop.RollbackAsync();
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_EXCEPTION,
-                        Message = ex.Message,
-                        Data = null
-                    };
-                }
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                    Data = null
-                };
-            }
+            return new ServiceResult(400, "Payment has already been completed.");
         }
-        public async Task<IServiceResult> ValidateRespond(IQueryCollection queryParams)
+
+        if (!transaction.PaymentGatewayId.HasValue)
         {
-            // Khai báo 'scop' ở ngoài để 'catch' có thể truy cập
-            Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction scop = null;
-            try
-            {
-                // Di chuyển BeginTransaction VÀO TRONG TRY
-                scop = await _unitOfWork.BeginTransactionAsync();
-
-                if (queryParams == null || !queryParams.Any())
-                {
-                    return new ServiceResult(Const.FAIL_READ_CODE, "Invalid query parameter");
-                }
-
-                var paymentResult = _vnPay.GetPaymentResult(queryParams);
-
-                if (paymentResult == null)
-                {
-                    return new ServiceResult(Const.FAIL_READ_CODE, " Payment result failed");
-                }
-
-                var gatewayId = paymentResult.PaymentId;
-                var transaction = await _unitOfWork.PaymentRepository.GetByGatewayIdAsync(gatewayId);
-
-                if (transaction == null)
-                {
-                    return new ServiceResult(Const.FAIL_READ_CODE, "Transaction not found");
-                }
-
-                if (paymentResult.IsSuccess)
-                {
-                    transaction.UpdateToPaymentVNPay(paymentResult);
-                    await _unitOfWork.PaymentRepository.UpdateAsync(transaction);
-
-                    // Nếu payment thành công cho subscription → Gắn subscription với AccountId
-                    if (transaction.SubscriptionId.HasValue && transaction.AccountId.HasValue)
-                    {
-                        var subscription = await _unitOfWork.SubscriptionRepository.GetByIdAsync(transaction.SubscriptionId.Value);
-                        if (subscription != null)
-                        {
-                            // Gắn subscription với AccountId
-                            subscription.AccountId = transaction.AccountId.Value;
-                            subscription.StartDate = DateTime.Now;
-                            
-                            // Tính EndDate dựa trên DurationPackage (ngày)
-                            if (subscription.DurationPackage.HasValue)
-                            {
-                                subscription.EndDate = DateTime.Now.AddDays(subscription.DurationPackage.Value);
-                            }
-
-                            // Set RemainingSwaps dựa trên loại gói
-                            // Premium (unlimited) → RemainingSwaps = null
-                            // Save (10-15 lượt) → RemainingSwaps = 15
-                            // Basic (trả tiền trực tiếp) → RemainingSwaps = 0 hoặc null
-                            if (subscription.Name?.Contains("nâng cao") == true || subscription.Name?.Contains("Premium") == true)
-                            {
-                                subscription.RemainingSwaps = null; // Unlimited
-                            }
-                            else if (subscription.Name?.Contains("Tiết kiệm") == true || subscription.Name?.Contains("Save") == true)
-                            {
-                                subscription.RemainingSwaps = 15; // 10-15 lượt
-                            }
-                            else
-                            {
-                                subscription.RemainingSwaps = null; // Basic - không giới hạn hoặc 0
-                            }
-
-                            subscription.IsActive = true;
-                            _unitOfWork.SubscriptionRepository.Update(subscription);
-                        }
-                    }
-                }
-                else
-                {
-                    if (scop != null) await scop.RollbackAsync();
-                    return new ServiceResult(Const.FAIL_READ_CODE, $"Payment failed or cancelled. Description: {paymentResult.Description}");
-                }
-
-                await scop.CommitAsync();
-
-                return new ServiceResult(Const.SUCCESS_PAYMENT_CODE, Const.SUCCESS_PAYMENT_MSG, paymentResult);
-            }
-            catch (Exception ex)
-            {
-                string errorMessage = ex.InnerException?.Message ?? ex.Message;
-                Console.WriteLine($"VNPayService.ValidateRespond error (Original): {errorMessage}");
-
-                try
-                {
-                    if (scop != null) await scop.RollbackAsync();
-                }
-                catch (Exception rollbackEx)
-                {
-                    Console.WriteLine($"FATAL: Error during Rollback: {rollbackEx.Message}");
-                }
-
-                return new ServiceResult(Const.ERROR_EXCEPTION, errorMessage);
-            }
+            transaction.PaymentGatewayId = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            transaction.TransactionReference = transaction.PaymentGatewayId.Value.ToString();
+            await _context.SaveChangesAsync();
         }
+
+        var request = new PaymentRequest
+        {
+            PaymentId = transaction.PaymentGatewayId.Value,
+            Money = Convert.ToDouble(transaction.Amount),
+            Description = $"Payment {transaction.PaymentId}",
+            IpAddress = ipAddress,
+            BankCode = BankCode.ANY,
+            CreatedDate = DateTime.UtcNow,
+            Currency = Currency.VND,
+            Language = DisplayLanguage.Vietnamese
+        };
+
+        var paymentUrl = _vnPay.GetPaymentUrl(request);
+        return new ServiceResult(200, "Create payment URL success", paymentUrl);
+    }
+
+    public async Task<IServiceResult> ValidateRespond(IQueryCollection queryParams)
+    {
+        if (queryParams is null || queryParams.Count == 0)
+        {
+            return new ServiceResult(400, "Invalid query parameter.");
+        }
+
+        var paymentResult = _vnPay.GetPaymentResult(queryParams);
+        if (paymentResult is null)
+        {
+            return new ServiceResult(400, "Payment result is invalid.");
+        }
+
+        var payment = await _context.Payments.FirstOrDefaultAsync(x => x.PaymentGatewayId == paymentResult.PaymentId);
+        if (payment is null)
+        {
+            return new ServiceResult(404, "Payment not found.");
+        }
+
+        if (paymentResult.IsSuccess)
+        {
+            payment.Status = "PAID";
+            payment.PaidAt = DateTime.UtcNow;
+            payment.TransactionReference ??= paymentResult.PaymentId.ToString();
+            await _context.SaveChangesAsync();
+            return new ServiceResult(200, "Payment success", paymentResult);
+        }
+
+        payment.Status = "FAILED";
+        await _context.SaveChangesAsync();
+        return new ServiceResult(400, $"Payment failed. Description: {paymentResult.Description}");
     }
 }

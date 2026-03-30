@@ -68,6 +68,12 @@ public sealed class DriverController : ApiControllerBase
             return forbidden;
         }
 
+        if (CurrentAccountId is not Guid accountId)
+        {
+            return MissingCurrentAccount();
+        }
+
+        dto.OwnerId = accountId;
         var result = await _carService.AddCarAsync(dto);
         return ApiResult(result, "VEHICLE_LINKED", "VEHICLE_CREATE_FAILED");
     }

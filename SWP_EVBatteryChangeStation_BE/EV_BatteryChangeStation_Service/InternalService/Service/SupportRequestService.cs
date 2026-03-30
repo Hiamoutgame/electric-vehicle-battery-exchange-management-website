@@ -1,179 +1,192 @@
-﻿using EV_BatteryChangeStation_Common.DTOs.SupportRequestDTO;
-using EV_BatteryChangeStation_Repository.Mapper;
+using EV_BatteryChangeStation_Common.DTOs.SupportRequestDTO;
+using EV_BatteryChangeStation_Repository.DBContext;
+using EV_BatteryChangeStation_Repository.Entities;
 using EV_BatteryChangeStation_Repository.UnitOfWork;
 using EV_BatteryChangeStation_Service.Base;
 using EV_BatteryChangeStation_Service.InternalService.IService;
-using System;
-using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 
-namespace EV_BatteryChangeStation_Service.InternalService.Service
+namespace EV_BatteryChangeStation_Service.InternalService.Service;
+
+public sealed class SupportRequestService : ISupportRequestService
 {
-    public class SupportRequestService : ISupportRequestService
+    private readonly AppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
+
+    public SupportRequestService(AppDbContext context, IUnitOfWork unitOfWork)
     {
-        private readonly IUnitOfWork _unitOfWork;
+        _context = context;
+        _unitOfWork = unitOfWork;
+    }
 
-        public SupportRequestService(IUnitOfWork unitOfWork)
+    public async Task<ServiceResult> GetAllAsync()
+    {
+        var requests = await _unitOfWork.SupportRequestRepository.GetForAdminAsync();
+        return ServiceResponse.Ok("Support requests retrieved successfully.", requests.Select(x => x.ToDto()).ToList());
+    }
+
+    public async Task<ServiceResult> GetByIdAsync(Guid id)
+    {
+        var request = await _unitOfWork.SupportRequestRepository.GetByIdWithDetailsAsync(id);
+        return request is null
+            ? ServiceResponse.NotFound("Support request not found.")
+            : ServiceResponse.Ok("Support request retrieved successfully.", new
+            {
+                request.RequestId,
+                request.AccountId,
+                request.StationId,
+                request.BookingId,
+                request.TransactionId,
+                request.IssueType,
+                request.Subject,
+                request.Description,
+                request.Priority,
+                request.Status,
+                request.CreateDate,
+                responses = request.Responses
+                    .OrderByDescending(x => x.RespondedAt)
+                    .Select(x => new
+                    {
+                        x.ResponseId,
+                        x.StaffId,
+                        x.ResponseMessage,
+                        x.StatusAfterResponse,
+                        x.RespondedAt
+                    })
+            });
+    }
+
+    public async Task<ServiceResult> CreateAsync(SupportRequestCreateDTO dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.IssueType) || string.IsNullOrWhiteSpace(dto.Description))
         {
-            _unitOfWork = unitOfWork;
+            return ServiceResponse.BadRequest("Issue type and description are required.");
         }
 
-        public async Task<ServiceResult> GetAllAsync()
-        {
-            try
-            {
-                var list = await _unitOfWork.SupportRequestRepository.GetAllAsync();
-                if (list == null || list.Count == 0)
-                    return new ServiceResult(404, "No support requests found.");
+        var latestBooking = await _context.Bookings
+            .AsNoTracking()
+            .Where(x => x.AccountId == dto.AccountId)
+            .OrderByDescending(x => x.CreateDate)
+            .FirstOrDefaultAsync();
 
-                return new ServiceResult(200, "Successfully retrieved support request list.", list.ToDTOList());
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while retrieving support request list.", ex.Message);
-            }
+        var request = new SupportRequest
+        {
+            RequestId = Guid.NewGuid(),
+            AccountId = dto.AccountId,
+            StationId = latestBooking?.StationId,
+            BookingId = latestBooking?.BookingId,
+            IssueType = dto.IssueType.Trim().ToUpperInvariant(),
+            Subject = dto.IssueType.Trim(),
+            Description = dto.Description.Trim(),
+            Priority = "MEDIUM",
+            Status = "OPEN",
+            CreateDate = DateTime.UtcNow
+        };
+
+        _context.SupportRequests.Add(request);
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Created("Support request created successfully.", request.ToDto());
+    }
+
+    public async Task<ServiceResult> UpdateAsync(Guid id, SupportRequestUpdateDTO dto)
+    {
+        var request = await _context.SupportRequests
+            .Include(x => x.Responses)
+            .FirstOrDefaultAsync(x => x.RequestId == id);
+
+        if (request is null)
+        {
+            return ServiceResponse.NotFound("Support request not found.");
         }
 
-        public async Task<ServiceResult> GetByIdAsync(Guid id)
+        if (dto.StaffId.HasValue && dto.StaffId.Value != Guid.Empty)
         {
-            try
+            if (string.IsNullOrWhiteSpace(dto.ResponseText))
             {
-                var req = await _unitOfWork.SupportRequestRepository.GetByIdAsync(id);
-                if (req == null)
-                    return new ServiceResult(404, "Support request not found.");
+                return ServiceResponse.BadRequest("Response text is required.");
+            }
 
-                return new ServiceResult(200, "Successfully retrieved support request.", req.ToDTO());
-            }
-            catch (Exception ex)
+            _context.SupportRequestResponses.Add(new SupportRequestResponse
             {
-                return new ServiceResult(500, "Error while retrieving support request.", ex.Message);
-            }
+                ResponseId = Guid.NewGuid(),
+                RequestId = request.RequestId,
+                StaffId = dto.StaffId.Value,
+                ResponseMessage = dto.ResponseText.Trim(),
+                StatusAfterResponse = "RESOLVED",
+                RespondedAt = DateTime.UtcNow
+            });
+
+            request.Status = "RESOLVED";
+            request.ClosedDate = DateTime.UtcNow;
         }
-
-        public async Task<ServiceResult> CreateAsync(SupportRequestCreateDTO dto)
+        else
         {
-            try
+            if (!string.IsNullOrWhiteSpace(dto.IssueType))
             {
-                if (string.IsNullOrWhiteSpace(dto.IssueType))
-                    return new ServiceResult(400, "Issue type (IssueType) cannot be empty.");
-
-                var account = await _unitOfWork.AccountRepository.GetByIdAsync(dto.AccountId);
-                if (account == null)
-                    return new ServiceResult(404, "The account submitting the request does not exist.");
-
-                var entity = dto.ToEntity();
-                entity.CreateDate = DateTime.Now;
-                entity.Status = true;
-
-                await _unitOfWork.SupportRequestRepository.CreateAsync(entity);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(201, "Support request created successfully.", entity.ToDTO());
+                request.IssueType = dto.IssueType.Trim().ToUpperInvariant();
+                request.Subject = dto.IssueType.Trim();
             }
-            catch (Exception ex)
+
+            if (!string.IsNullOrWhiteSpace(dto.Description))
             {
-                return new ServiceResult(500, "Error while creating support request.", ex.Message);
-            }
-        }
-
-        public async Task<ServiceResult> UpdateAsync(Guid id, SupportRequestUpdateDTO dto)
-        {
-            try
-            {
-                var req = await _unitOfWork.SupportRequestRepository.GetByIdAsync(id);
-                if (req == null)
-                    return new ServiceResult(404, "Support request not found for update.");
-
-                req.UpdateEntity(dto);
-                req.ResponseDate = DateTime.Now;
-
-                await _unitOfWork.SupportRequestRepository.UpdateAsync(req);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Support request updated successfully.", req.ToDTO());
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while updating support request.", ex.Message);
-            }
-        }
-
-        public async Task<ServiceResult> SoftDeleteAsync(Guid id)
-        {
-            try
-            {
-                var req = await _unitOfWork.SupportRequestRepository.GetByIdAsync(id);
-                if (req == null)
-                    return new ServiceResult(404, "Support request not found for deletion.");
-
-                req.Status = false;
-                await _unitOfWork.SupportRequestRepository.UpdateAsync(req);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Support request has been deactivated (Soft Delete).");
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while deleting support request.", ex.Message);
-            }
-        }
-
-        public async Task<ServiceResult> HardDeleteAsync(Guid id)
-        {
-            try
-            {
-                var req = await _unitOfWork.SupportRequestRepository.GetByIdAsync(id);
-                if (req == null)
-                    return new ServiceResult(404, "Support request not found for permanent deletion.");
-
-                await _unitOfWork.SupportRequestRepository.RemoveAsync(req);
-                await _unitOfWork.CommitAsync();
-
-                return new ServiceResult(200, "Support request permanently deleted.");
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while permanently deleting support request.", ex.Message);
+                request.Description = dto.Description.Trim();
             }
         }
 
-        public async Task<ServiceResult> GetByAccountIdAsync(Guid accountId)
+        request.UpdateDate = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        request = await _context.SupportRequests
+            .AsNoTracking()
+            .Include(x => x.Responses)
+            .FirstAsync(x => x.RequestId == id);
+
+        return ServiceResponse.Ok("Support request updated successfully.", request.ToDto());
+    }
+
+    public async Task<ServiceResult> SoftDeleteAsync(Guid id)
+    {
+        var request = await _context.SupportRequests.FirstOrDefaultAsync(x => x.RequestId == id);
+        if (request is null)
         {
-            try
-            {
-                var list = await _unitOfWork.SupportRequestRepository
-                    .GetAllAsync();
-
-                var filtered = list.Where(r => r.AccountId == accountId).ToList();
-
-                if (filtered == null || filtered.Count == 0)
-                    return new ServiceResult(404, "No support requests found for this account.");
-
-                return new ServiceResult(200, "Successfully retrieved support requests by AccountId.", filtered.ToDTOList());
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while retrieving support requests by AccountId.", ex.Message);
-            }
+            return ServiceResponse.NotFound("Support request not found.");
         }
 
-        public async Task<ServiceResult> GetByStaffIdAsync(Guid staffId)
+        request.Status = "CLOSED";
+        request.ClosedDate = DateTime.UtcNow;
+        request.UpdateDate = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Support request closed successfully.");
+    }
+
+    public async Task<ServiceResult> HardDeleteAsync(Guid id)
+    {
+        var request = await _context.SupportRequests.FirstOrDefaultAsync(x => x.RequestId == id);
+        if (request is null)
         {
-            try
-            {
-                var list = await _unitOfWork.SupportRequestRepository
-                    .GetAllAsync();
-
-                var filtered = list.Where(r => r.StaffId == staffId).ToList();
-
-                if (filtered == null || filtered.Count == 0)
-                    return new ServiceResult(404, "No support requests found assigned to this staff.");
-
-                return new ServiceResult(200, "Successfully retrieved support requests by StaffId.", filtered.ToDTOList());
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult(500, "Error while retrieving support requests by StaffId.", ex.Message);
-            }
+            return ServiceResponse.NotFound("Support request not found.");
         }
+
+        _context.SupportRequests.Remove(request);
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Support request deleted successfully.");
+    }
+
+    public async Task<ServiceResult> GetByAccountIdAsync(Guid accountId)
+    {
+        var requests = await _unitOfWork.SupportRequestRepository.GetByAccountAsync(accountId);
+        return ServiceResponse.Ok("Support requests retrieved successfully.", requests.Select(x => x.ToDto()).ToList());
+    }
+
+    public async Task<ServiceResult> GetByStaffIdAsync(Guid staffId)
+    {
+        var stationId = await _unitOfWork.StationRepository.GetAssignedStationIdAsync(staffId);
+        if (!stationId.HasValue)
+        {
+            return ServiceResponse.NotFound("Staff is not assigned to any station.");
+        }
+
+        var requests = await _unitOfWork.SupportRequestRepository.GetByStationAsync(stationId.Value);
+        return ServiceResponse.Ok("Support requests retrieved successfully.", requests.Select(x => x.ToDto()).ToList());
     }
 }

@@ -1,432 +1,285 @@
-﻿using EV_BatteryChangeStation_Common.DTOs.CarDTO;
-using EV_BatteryChangeStation_Common.Enum.CarEnum;
-using EV_BatteryChangeStation_Common.Enum.ServiceResult;
+using EV_BatteryChangeStation_Common.DTOs.CarDTO;
+using EV_BatteryChangeStation_Repository.DBContext;
 using EV_BatteryChangeStation_Repository.Entities;
-using EV_BatteryChangeStation_Repository.Mapper;
 using EV_BatteryChangeStation_Repository.UnitOfWork;
 using EV_BatteryChangeStation_Service.Base;
 using EV_BatteryChangeStation_Service.InternalService.IService;
-using Microsoft.IdentityModel.Tokens;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 
-namespace EV_BatteryChangeStation_Service.InternalService.Service
+namespace EV_BatteryChangeStation_Service.InternalService.Service;
+
+public sealed class CarService : ICarService
 {
-    public class CarService : ICarService
+    private readonly AppDbContext _context;
+    private readonly IUnitOfWork _unitOfWork;
+
+    public CarService(AppDbContext context, IUnitOfWork unitOfWork)
     {
-        private readonly IUnitOfWork _unitOfWork;
-        public CarService(IUnitOfWork unitOfWork)
-        {
-            _unitOfWork = unitOfWork ?? throw new ArgumentException(nameof(unitOfWork));
-        }
-        // Add new car
-        private bool IsValidUrl(string url)
-        {
-            if (string.IsNullOrWhiteSpace(url)) return false;
+        _context = context;
+        _unitOfWork = unitOfWork;
+    }
 
-            return Uri.TryCreate(url, UriKind.Absolute, out Uri uriResult)
-                && (uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps);
+    public async Task<IServiceResult> AddCarAsync(CreateCarDto createCar)
+    {
+        if (!createCar.OwnerId.HasValue || createCar.OwnerId == Guid.Empty)
+        {
+            return ServiceResponse.BadRequest("OwnerId is required.");
         }
 
-        public async Task<IServiceResult> AddCarAsync(CreateCarDto createCar)
+        if (string.IsNullOrWhiteSpace(createCar.Model) ||
+            string.IsNullOrWhiteSpace(createCar.BatteryType) ||
+            string.IsNullOrWhiteSpace(createCar.LicensePlate))
         {
-            try
-            {
-                if (createCar == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = Const.ERROR_INVALID_DATA_MSG,
-                    };
-                }
-                if (!string.IsNullOrEmpty(createCar.Images) && !IsValidUrl(createCar.Images))
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = "Image URL is invalid. Please provide a valid HTTP or HTTPS URL.",
-                    };
-                }
-                var result = createCar.MaptoCreate();
-                await _unitOfWork.CarRepository.CreateAsync(result);
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_CREATE_CODE,
-                    Message = Const.SUCCESS_CREATE_MSG,
-                    Data = result
-                };
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                };
-            }
+            return ServiceResponse.BadRequest("Model, battery type and license plate are required.");
         }
 
-        public async Task<IServiceResult> DeleteCarAsync(Guid carId)
+        var ownerExists = await _context.Accounts.AnyAsync(x => x.AccountId == createCar.OwnerId.Value);
+        if (!ownerExists)
         {
-            try
-            {
-                if (carId == Guid.Empty)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = Const.ERROR_INVALID_DATA_MSG,
-                    };
-                }
-                var decodedId = await _unitOfWork.CarRepository.GetByIdAsync(carId);
-                if (decodedId == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = Const.WARNING_NO_DATA_MSG,
-                    };
-                }
-                await _unitOfWork.CarRepository.RemoveAsync(decodedId);
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_DELETE_CODE,
-                    Message = Const.SUCCESS_DELETE_MSG,
-                };
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                };
-            }
-        }
-        // Get all cars
-        public async Task<IServiceResult> GetAllCarsAsync()
-        {
-            try
-            {
-                var result = await _unitOfWork.CarRepository.GetAllAsync();
-                if (result == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = Const.WARNING_NO_DATA_MSG,
-                    };
-                }
-                var mappedResult = result.Select(car => car.MapToEntity()).ToList();
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_READ_CODE,
-                    Message = Const.SUCCESS_READ_MSG,
-                    Data = mappedResult
-                };
-            }
-            catch(Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                };
-            }
+            return ServiceResponse.NotFound("Owner account not found.");
         }
 
-        // Get owner by car id
-        public async Task<IServiceResult> GetOwnerByCarIdAsync(Guid carId)
+        if (await _unitOfWork.VehicleRepository.ExistsLicensePlateAsync(createCar.LicensePlate))
         {
-            try
-            {
-                // Kiểm tra đầu vào
-                if (carId == Guid.Empty)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = Const.ERROR_INVALID_DATA_MSG,
-                    };
-                }
-                // Gọi repository
-                var owner = await _unitOfWork.CarRepository.GetOwnerByCarIdAsync(carId);
-
-                // Nếu không tìm thấy dữ liệu
-                if (owner == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = "Can not find the owner",
-                    };
-                }
-
-                // Thành công
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_READ_CODE,
-                    Message = Const.SUCCESS_READ_MSG,
-                    Data = owner
-                };
-            }
-            catch (Exception ex)
-            {
-                // Bắt lỗi
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                };
-            }
+            return ServiceResponse.Conflict("License plate already exists.");
         }
 
-        // Get car by id
-        public async Task<IServiceResult> GetCarByIdAsync(Guid carId)
+        if (!string.IsNullOrWhiteSpace(createCar.Vin) && await _unitOfWork.VehicleRepository.ExistsVinAsync(createCar.Vin))
         {
-            try
-            {
-                if (carId == Guid.Empty)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = Const.ERROR_INVALID_DATA_MSG,
-                    };
-                }
-                var decodedId = await _unitOfWork.CarRepository.GetByIdAsync(carId);
-                if (decodedId == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = Const.WARNING_NO_DATA_MSG,
-                    };
-                }
-                var mappedResult = decodedId.MapToEntity();
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_READ_CODE,
-                    Message = Const.SUCCESS_READ_MSG,
-                    Data = mappedResult
-                };
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                };
-            }
+            return ServiceResponse.Conflict("VIN already exists.");
         }
 
-        public async Task<IServiceResult> SoftDeleteCarAsync(Guid carid)
-        {
-            try
-            {
-                if (carid == Guid.Empty)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = Const.ERROR_INVALID_DATA_MSG,
-                    };
-                }
-                var car = await _unitOfWork.CarRepository.GetByIdAsync(carid);
-                if (car == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = Const.WARNING_NO_DATA_MSG,
-                    };
-                }
-                car.Status = CarEnum.Unavailable.ToString();
-                var result = await _unitOfWork.CarRepository.UpdateAsync(car);
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_DELETE_CODE,
-                    Message = Const.SUCCESS_DELETE_MSG,
-                };
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                };
-            }
-        }
-        // Update car
-        public async Task<IServiceResult> UpdateCarAsync(UpdateCarDto updateCarDto)
-        {
-            try
-            {
-                if (updateCarDto == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = Const.ERROR_INVALID_DATA_MSG,
-                    };
-                }
-                var car = await _unitOfWork.CarRepository.GetByIdAsync(updateCarDto.VehicleId);
-                if (car == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = Const.WARNING_NO_DATA_MSG,
-                    };
-                }
+        var batteryType = await ResolveBatteryTypeAsync(createCar.BatteryType);
+        var model = await ResolveVehicleModelAsync(createCar.Model, createCar.Producer, batteryType.BatteryTypeId);
 
-                if (!string.IsNullOrEmpty(updateCarDto.Images) && !IsValidUrl(updateCarDto.Images))
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = "Image URL is invalid. Please provide a valid HTTP or HTTPS URL.",
-                    };
-                }
+        var vehicle = new Vehicle
+        {
+            VehicleId = Guid.NewGuid(),
+            OwnerId = createCar.OwnerId.Value,
+            ModelId = model.ModelId,
+            Vin = createCar.Vin?.Trim(),
+            LicensePlate = createCar.LicensePlate.Trim().ToUpperInvariant(),
+            Status = string.IsNullOrWhiteSpace(createCar.Status) ? "ACTIVE" : createCar.Status.Trim().ToUpperInvariant(),
+            CreateDate = createCar.CreateDate ?? DateTime.UtcNow
+        };
 
-                car.MaptoUpdate(updateCarDto);
-                await _unitOfWork.CarRepository.UpdateAsync(car);
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_UPDATE_CODE,
-                    Message = Const.SUCCESS_UPDATE_MSG,
-                };
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                };
-            }
+        _context.Vehicles.Add(vehicle);
+        await _context.SaveChangesAsync();
+
+        vehicle.Model = model;
+        return ServiceResponse.Created("Vehicle created successfully.", vehicle.ToDto());
+    }
+
+    public async Task<IServiceResult> GetAllCarsAsync()
+    {
+        var vehicles = await _context.Vehicles
+            .AsNoTracking()
+            .Include(x => x.Model)
+                .ThenInclude(x => x!.BatteryType)
+            .Include(x => x.CurrentBattery)
+            .OrderByDescending(x => x.CreateDate)
+            .ToListAsync();
+
+        return ServiceResponse.Ok("Vehicles retrieved successfully.", vehicles.Select(x => x.ToDto()).ToList());
+    }
+
+    public async Task<IServiceResult> GetCarByIdAsync(Guid carId)
+    {
+        var vehicle = await _unitOfWork.VehicleRepository.GetByIdWithDetailsAsync(carId);
+        return vehicle is null
+            ? ServiceResponse.NotFound("Vehicle not found.")
+            : ServiceResponse.Ok("Vehicle retrieved successfully.", vehicle.ToDto());
+    }
+
+    public async Task<IServiceResult> UpdateCarAsync(UpdateCarDto updateCarDto)
+    {
+        var vehicle = await _context.Vehicles
+            .Include(x => x.Model)
+                .ThenInclude(x => x!.BatteryType)
+            .FirstOrDefaultAsync(x => x.VehicleId == updateCarDto.VehicleId);
+
+        if (vehicle is null)
+        {
+            return ServiceResponse.NotFound("Vehicle not found.");
         }
 
-        public async Task<IServiceResult> GetCarByNameAsync(string modelName)
+        if (!string.IsNullOrWhiteSpace(updateCarDto.LicensePlate) &&
+            !string.Equals(updateCarDto.LicensePlate.Trim(), vehicle.LicensePlate, StringComparison.OrdinalIgnoreCase))
         {
-            try
+            if (await _unitOfWork.VehicleRepository.ExistsLicensePlateAsync(updateCarDto.LicensePlate, vehicle.VehicleId))
             {
-                if (modelName.IsNullOrEmpty())
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = Const.ERROR_INVALID_DATA_MSG,
-                    };
-                }
-                var result = await _unitOfWork.CarRepository.GetCarByNameAsync(modelName);
-                if (result == null || result.Count == 0)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = Const.WARNING_NO_DATA_MSG,
-                    };
-                }
-                var mappedResult = result.Select(car => car.MapToEntity()).ToList();
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_READ_CODE,
-                    Message = Const.SUCCESS_READ_MSG,
-                    Data = mappedResult
-                };
+                return ServiceResponse.Conflict("License plate already exists.");
             }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                };
-            }
+
+            vehicle.LicensePlate = updateCarDto.LicensePlate.Trim().ToUpperInvariant();
         }
 
-        public Task<IServiceResult> GetCarsByOwnerIdAsync(Guid ownerId)
+        if (!string.IsNullOrWhiteSpace(updateCarDto.Vin) &&
+            !string.Equals(updateCarDto.Vin.Trim(), vehicle.Vin, StringComparison.OrdinalIgnoreCase))
         {
-            try
+            if (await _unitOfWork.VehicleRepository.ExistsVinAsync(updateCarDto.Vin, vehicle.VehicleId))
             {
-                if (ownerId == Guid.Empty)
-                {
-                    return Task.FromResult<IServiceResult>(new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = Const.ERROR_INVALID_DATA_MSG,
-                    });
-                }
-                var result = _unitOfWork.CarRepository.GetCarsByOwnerIdAsync(ownerId);
-                if (result == null || result.Result.Count == 0)
-                {
-                    return Task.FromResult<IServiceResult>(new ServiceResult
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = Const.WARNING_NO_DATA_MSG,
-                    });
-                }
-                var mappedResult = result.Result.Select(car => car?.MapToEntity()).ToList();
-                return Task.FromResult<IServiceResult>(new ServiceResult
-                {
-                    Status = Const.SUCCESS_READ_CODE,
-                    Message = Const.SUCCESS_READ_MSG,
-                    Data = mappedResult
-                });
+                return ServiceResponse.Conflict("VIN already exists.");
             }
-            catch (Exception ex)
-            {
-                return Task.FromResult<IServiceResult>(new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                });
-            }
+
+            vehicle.Vin = updateCarDto.Vin.Trim();
         }
 
-        public Task<IServiceResult> GetBatteriesByCarAsync(Guid vehicle)
+        if (!string.IsNullOrWhiteSpace(updateCarDto.Model) && !string.IsNullOrWhiteSpace(updateCarDto.BatteryType))
         {
-            try
-            {
-                if (vehicle == Guid.Empty)
-                {
-                    return Task.FromResult<IServiceResult>(new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = Const.ERROR_INVALID_DATA_MSG,
-                    });
-                }
-                var result = _unitOfWork.CarRepository.GetBatteriesByCarAsync(vehicle);
-                if (result == null || result.Result.Count == 0)
-                {
-                    return Task.FromResult<IServiceResult>(new ServiceResult
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = Const.WARNING_NO_DATA_MSG,
-                    });
-                }
-                return Task.FromResult<IServiceResult>(new ServiceResult
-                {
-                    Status = Const.SUCCESS_READ_CODE,
-                    Message = Const.SUCCESS_READ_MSG,
-                    Data = result.Result
-                });
-            }
-            catch (Exception ex)
-            {
-                return Task.FromResult<IServiceResult>(new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                });
-            }
+            var batteryType = await ResolveBatteryTypeAsync(updateCarDto.BatteryType);
+            var model = await ResolveVehicleModelAsync(updateCarDto.Model, updateCarDto.Producer, batteryType.BatteryTypeId);
+            vehicle.ModelId = model.ModelId;
+            vehicle.Model = model;
         }
+
+        if (updateCarDto.OwnerId.HasValue && updateCarDto.OwnerId.Value != Guid.Empty)
+        {
+            vehicle.OwnerId = updateCarDto.OwnerId.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(updateCarDto.Status))
+        {
+            vehicle.Status = updateCarDto.Status.Trim().ToUpperInvariant();
+        }
+
+        vehicle.UpdateDate = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        return ServiceResponse.Ok("Vehicle updated successfully.", vehicle.ToDto());
+    }
+
+    public async Task<IServiceResult> DeleteCarAsync(Guid carId)
+    {
+        var vehicle = await _context.Vehicles.FirstOrDefaultAsync(x => x.VehicleId == carId);
+        if (vehicle is null)
+        {
+            return ServiceResponse.NotFound("Vehicle not found.");
+        }
+
+        _context.Vehicles.Remove(vehicle);
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Vehicle deleted successfully.");
+    }
+
+    public async Task<IServiceResult> SoftDeleteCarAsync(Guid carid)
+    {
+        var vehicle = await _context.Vehicles.FirstOrDefaultAsync(x => x.VehicleId == carid);
+        if (vehicle is null)
+        {
+            return ServiceResponse.NotFound("Vehicle not found.");
+        }
+
+        vehicle.Status = "INACTIVE";
+        vehicle.UpdateDate = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return ServiceResponse.Ok("Vehicle deactivated successfully.");
+    }
+
+    public async Task<IServiceResult> GetOwnerByCarIdAsync(Guid carid)
+    {
+        var vehicle = await _context.Vehicles
+            .AsNoTracking()
+            .Include(x => x.Owner)
+                .ThenInclude(x => x!.Role)
+            .FirstOrDefaultAsync(x => x.VehicleId == carid);
+
+        return vehicle?.Owner is null
+            ? ServiceResponse.NotFound("Vehicle owner not found.")
+            : ServiceResponse.Ok("Vehicle owner retrieved successfully.", vehicle.Owner.ToViewDto());
+    }
+
+    public async Task<IServiceResult> GetCarByNameAsync(string modelName)
+    {
+        if (string.IsNullOrWhiteSpace(modelName))
+        {
+            return ServiceResponse.BadRequest("Model name is required.");
+        }
+
+        var vehicles = await _context.Vehicles
+            .AsNoTracking()
+            .Include(x => x.Model)
+                .ThenInclude(x => x!.BatteryType)
+            .Where(x => x.Model != null && x.Model.ModelName.ToUpper().Contains(modelName.Trim().ToUpper()))
+            .ToListAsync();
+
+        return ServiceResponse.Ok("Vehicles retrieved successfully.", vehicles.Select(x => x.ToDto()).ToList());
+    }
+
+    public async Task<IServiceResult> GetCarsByOwnerIdAsync(Guid ownerId)
+    {
+        var vehicles = await _unitOfWork.VehicleRepository.GetByOwnerAsync(ownerId);
+        return ServiceResponse.Ok("Vehicles retrieved successfully.", vehicles.Select(x => x.ToDto()).ToList());
+    }
+
+    public async Task<IServiceResult> GetBatteriesByCarAsync(Guid vehicle)
+    {
+        var car = await _unitOfWork.VehicleRepository.GetByIdWithDetailsAsync(vehicle);
+        if (car is null)
+        {
+            return ServiceResponse.NotFound("Vehicle not found.");
+        }
+
+        if (car.CurrentBattery is null)
+        {
+            return ServiceResponse.NotFound("Vehicle does not have a current battery.");
+        }
+
+        return ServiceResponse.Ok("Current battery retrieved successfully.", car.CurrentBattery.ToDto());
+    }
+
+    private async Task<BatteryType> ResolveBatteryTypeAsync(string batteryTypeName)
+    {
+        var normalized = batteryTypeName.Trim();
+        var existing = await _context.BatteryTypes
+            .FirstOrDefaultAsync(x => x.BatteryTypeName == normalized || x.BatteryTypeCode == normalized);
+
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var batteryType = new BatteryType
+        {
+            BatteryTypeId = Guid.NewGuid(),
+            BatteryTypeCode = normalized.ToUpperInvariant().Replace(" ", "_"),
+            BatteryTypeName = normalized,
+            Status = "ACTIVE",
+            CreateDate = DateTime.UtcNow
+        };
+
+        _context.BatteryTypes.Add(batteryType);
+        await _context.SaveChangesAsync();
+        return batteryType;
+    }
+
+    private async Task<VehicleModel> ResolveVehicleModelAsync(string modelName, string? producer, Guid batteryTypeId)
+    {
+        var normalizedModel = modelName.Trim();
+        var normalizedProducer = producer?.Trim();
+
+        var existing = await _context.VehicleModels.FirstOrDefaultAsync(x =>
+            x.ModelName == normalizedModel &&
+            x.BatteryTypeId == batteryTypeId &&
+            (x.Producer ?? string.Empty) == (normalizedProducer ?? string.Empty));
+
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var model = new VehicleModel
+        {
+            ModelId = Guid.NewGuid(),
+            ModelName = normalizedModel,
+            Producer = normalizedProducer,
+            BatteryTypeId = batteryTypeId,
+            Status = "ACTIVE",
+            CreateDate = DateTime.UtcNow
+        };
+
+        _context.VehicleModels.Add(model);
+        await _context.SaveChangesAsync();
+        return model;
     }
 }

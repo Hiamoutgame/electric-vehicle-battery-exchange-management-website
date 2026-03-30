@@ -1,8 +1,5 @@
 ﻿using EV_BatteryChangeStation_Common.DTOs.BatteryDTO;
-using EV_BatteryChangeStation_Repository.Base;
-using EV_BatteryChangeStation_Repository.Entities;
 using EV_BatteryChangeStation_Service.Base;
-using Microsoft.AspNetCore.DataProtection.Internal;
 using System;
 using System.Collections.Generic;
 using System.Linq;

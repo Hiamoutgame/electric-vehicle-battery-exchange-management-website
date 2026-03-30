@@ -32,7 +32,13 @@ namespace EV_BatteryChangeStation_Service.ExternalService.Service
         {
             try
             {
-                var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["JwtConfig:Key"]));
+                var jwtKey = _config["JwtConfig:Key"] ?? throw new InvalidOperationException("JwtConfig:Key is missing.");
+                var issuer = _config["JwtConfig:Issuer"] ?? "App";
+                var audience = _config["JwtConfig:Audience"] ?? "App";
+                var expiryRaw = _config["JwtConfig:ExpireMinutes"] ?? _config["JwtConfig:ExpiresInMinutes"];
+                var expiryMinutes = double.TryParse(expiryRaw, out var parsedMinutes) ? parsedMinutes : 30d;
+
+                var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
                 var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
                 var claims = new List<Claim>
                 {
@@ -44,11 +50,9 @@ namespace EV_BatteryChangeStation_Service.ExternalService.Service
                 var token = new SecurityTokenDescriptor
                 {
                     Subject = new ClaimsIdentity(claims),
-                    Expires = _config["JwtConfig:ExpiresInMinutes"] != null
-                    ? DateTime.UtcNow.AddMinutes(double.Parse(_config["JwtConfig:ExpiresInMinutes"]))
-                    : DateTime.UtcNow.AddMinutes(30),
-                    Issuer = _config["JwtConfig:Issuer"],
-                    Audience = _config["JwtConfig:Audience"],
+                    Expires = DateTime.UtcNow.AddMinutes(expiryMinutes),
+                    Issuer = issuer,
+                    Audience = audience,
                     SigningCredentials = creds
                 };
                 var tokenHandler = new JwtSecurityTokenHandler();
@@ -78,15 +82,18 @@ namespace EV_BatteryChangeStation_Service.ExternalService.Service
                 };
             }
             var tokenHandler = new JwtSecurityTokenHandler();
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["JwtConfig:Key"]));
+            var jwtKey = _config["JwtConfig:Key"] ?? throw new InvalidOperationException("JwtConfig:Key is missing.");
+            var issuer = _config["JwtConfig:Issuer"] ?? "App";
+            var audience = _config["JwtConfig:Audience"] ?? "App";
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
             var validation = new TokenValidationParameters
             {
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = key,
                 ValidateIssuer = true,
-                ValidIssuer = _config["JwtConfig:Issuer"],
+                ValidIssuer = issuer,
                 ValidateAudience = true,
-                ValidAudience = _config["JwtConfig:Audience"],
+                ValidAudience = audience,
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.FromMinutes(2)
             };

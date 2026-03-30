@@ -1,20 +1,13 @@
 ﻿using EV_BatteryChangeStation_Repository.Entities;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace EV_BatteryChangeStation_Repository.IRepositories
+namespace EV_BatteryChangeStation_Repository.IRepositories;
+
+public interface IStationRepository
 {
-    public interface IStationRepository
-    {
-        Task<List<Station>> GetAllAsync();
-        Task<Station> GetByIdAsync(Guid id);
-        Task<List<Station>> SearchByNameAsync(string keyword);
-        Task<Station> GetByNameAsync(string name);
-        void Create(Station station);
-        void Update(Station station);
-        void Delete(Station station);
-    }
+    Task<List<Station>> GetActiveStationsAsync(string? keyword = null, string? area = null, Guid? batteryTypeId = null, CancellationToken cancellationToken = default);
+    Task<List<Station>> GetStationsForAdminAsync(string? status = null, string? keyword = null, CancellationToken cancellationToken = default);
+    Task<Station?> GetStationDetailAsync(Guid stationId, CancellationToken cancellationToken = default);
+    Task<Station?> GetByIdForManagementAsync(Guid stationId, CancellationToken cancellationToken = default);
+    Task<Guid?> GetAssignedStationIdAsync(Guid staffId, DateOnly? effectiveDate = null, CancellationToken cancellationToken = default);
 }
+

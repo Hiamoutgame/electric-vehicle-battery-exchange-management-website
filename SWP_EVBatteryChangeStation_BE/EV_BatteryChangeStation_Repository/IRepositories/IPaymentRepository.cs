@@ -1,25 +1,13 @@
-﻿using EV_BatteryChangeStation_Repository.Base;
-using EV_BatteryChangeStation_Repository.Entities;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using EV_BatteryChangeStation_Repository.Entities;
 
-namespace EV_BatteryChangeStation_Repository.IRepositories
+namespace EV_BatteryChangeStation_Repository.IRepositories;
+
+public interface IPaymentRepository
 {
-    public interface IPaymentRepository : IGenericRepository<Payment>
-    {
-        Task<List<Payment>> GetAllPaymentDetailAsync();
-        Task<Payment?> GetPaymentWithTransactionIdAsync(Guid transactionId);
-        Task<List<Payment?>> GetPaymentHistoryByAccountIdAsync(Guid accountId);
-        Task<Payment?> GetByGatewayIdAsync(long gatewayId);
-        Task<bool> CheckPaymentOwnerAsync(Guid accountId, Payment payment);
-        
-        /// <summary>
-        /// Lấy payment thành công có subscription còn hạn của account
-        /// Dùng để check xem user có cần redirect đến trang thanh toán hay không
-        /// </summary>
-        Task<Payment?> GetActiveSubscriptionPaymentByAccountIdAsync(Guid accountId);
-    }
+    Task<Payment?> GetByIdAsync(Guid paymentId, CancellationToken cancellationToken = default);
+    Task<List<Payment>> GetPaymentsByAccountAsync(Guid accountId, CancellationToken cancellationToken = default);
+    Task<List<Payment>> GetPaymentsByBookingAsync(Guid bookingId, CancellationToken cancellationToken = default);
+    Task<Payment?> GetByTransactionReferenceAsync(string transactionReference, CancellationToken cancellationToken = default);
 }
+
+

@@ -1,118 +1,68 @@
-﻿using EV_BatteryChangeStation_Repository.Base;
+﻿using EV_BatteryChangeStation_Repository.DBContext;
 using EV_BatteryChangeStation_Repository.Entities;
 using EV_BatteryChangeStation_Repository.IRepositories;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace EV_BatteryChangeStation_Repository.Repositories
+namespace EV_BatteryChangeStation_Repository.Repositories;
+
+public sealed class PaymentRepository : IPaymentRepository
 {
-    public class PaymentRepository : GenericRepository<Payment>, IPaymentRepository
+    private readonly AppDbContext _context;
+
+    public PaymentRepository(AppDbContext context)
     {
-        public PaymentRepository() { }
+        _context = context;
+    }
 
-        public PaymentRepository(EVBatterySwapContext context) => _context = context;
-        public async Task<List<Payment>> GetAllPaymentDetailAsync()
-        {
-            return await _context.Payments
-                .Include(s => s.Transaction)
-                .Include(s => s.Subscription)
-                .ToListAsync();
-        }
+    public Task<Payment?> GetByIdAsync(Guid paymentId, CancellationToken cancellationToken = default)
+    {
+        return _context.Payments
+            .AsNoTracking()
+            .AsSplitQuery()
+            .Include(x => x.Account)
+            .Include(x => x.Booking)
+                .ThenInclude(x => x!.Station)
+            .Include(x => x.UserSubscription)
+                .ThenInclude(x => x!.Plan)
+            .Include(x => x.Transaction)
+                .ThenInclude(x => x!.Station)
+            .Include(x => x.RecordedByAccount)
+            .FirstOrDefaultAsync(x => x.PaymentId == paymentId, cancellationToken);
+    }
 
-        public async Task<List<Payment>> GetPaymentHistoryByAccountIdAsync(Guid accountId)
-        {
-            return await _context.Payments
-                .Include(p => p.Subscription)
-                    .ThenInclude(s => s.Account)
-                .Include(p => p.Transaction)
-                    .ThenInclude(t => t.Vehicle)
-                .Include(p => p.Transaction)
-                    .ThenInclude(t => t.Staff)
-                .Include(p => p.Account)
-                .Where(p =>
-                    p.AccountId == accountId ||
-                    (p.Subscription != null && p.Subscription.AccountId == accountId) ||
-                    (p.Transaction != null &&
-                     _context.Bookings.Any(b => b.VehicleId == p.Transaction.VehicleId && b.AccountId == accountId))
-                )
-                .OrderByDescending(p => p.CreateDate)
-                .ToListAsync();
-        }
+    public Task<List<Payment>> GetPaymentsByAccountAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        return _context.Payments
+            .AsNoTracking()
+            .Include(x => x.Booking)
+                .ThenInclude(x => x!.Station)
+            .Include(x => x.UserSubscription)
+                .ThenInclude(x => x!.Plan)
+            .Include(x => x.Transaction)
+            .Where(x => x.AccountId == accountId)
+            .OrderByDescending(x => x.PaidAt ?? x.CreateDate)
+            .ToListAsync(cancellationToken);
+    }
 
+    public Task<List<Payment>> GetPaymentsByBookingAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    {
+        return _context.Payments
+            .AsNoTracking()
+            .Include(x => x.Transaction)
+            .Include(x => x.RecordedByAccount)
+            .Where(x => x.BookingId == bookingId)
+            .OrderByDescending(x => x.PaidAt ?? x.CreateDate)
+            .ToListAsync(cancellationToken);
+    }
 
-        public async Task<Payment?> GetPaymentWithTransactionIdAsync(Guid transactionId)
-        {
-            return await _context.Payments
-                .Include(p => p.Transaction)
-                .FirstOrDefaultAsync(p => p.TransactionId.Equals(transactionId));
-        }
+    public Task<Payment?> GetByTransactionReferenceAsync(string transactionReference, CancellationToken cancellationToken = default)
+    {
+        var normalizedReference = transactionReference.Trim();
 
-        public async Task<Payment?> GetByGatewayIdAsync(long gatewayId)
-        {
-            return await _context.Payments
-                .Include(p => p.Transaction)
-                .Include(p => p.Subscription)
-                .FirstOrDefaultAsync(t => t.PaymentGateId == gatewayId);
-        }
-
-        public async Task<bool> CheckPaymentOwnerAsync(Guid accountId, Payment payment)
-        {
-            if (payment == null || accountId == Guid.Empty)
-                return false;
-
-            bool isOwner = false;
-
-            // 🧾 1️⃣ Kiểm tra Payment theo Subscription
-            if (payment.SubscriptionId.HasValue)
-            {
-                isOwner = await _context.Subscriptions
-                    .AnyAsync(s => s.SubscriptionId == payment.SubscriptionId && s.AccountId == accountId);
-            }
-
-            // 🚗 2️⃣ Kiểm tra Payment theo Transaction → Vehicle → Booking
-            if (!isOwner && payment.TransactionId.HasValue)
-            {
-                var trans = await _context.SwappingTransactions
-                    .Include(t => t.Vehicle)
-                    .FirstOrDefaultAsync(t => t.TransactionId == payment.TransactionId);
-
-                if (trans?.VehicleId != null && trans.VehicleId != Guid.Empty)
-                {
-                    isOwner = await _context.Bookings
-                        .AnyAsync(b => b.VehicleId == trans.VehicleId && b.AccountId == accountId);
-                }
-            }
-
-            return isOwner;
-        }
-
-        /// <summary>
-        /// Lấy payment thành công có subscription còn hạn của account
-        /// Dùng để check xem user có cần redirect đến trang thanh toán hay không
-        /// </summary>
-        public async Task<Payment?> GetActiveSubscriptionPaymentByAccountIdAsync(Guid accountId)
-        {
-            var now = DateTime.Now;
-
-            return await _context.Payments
-                .Include(p => p.Subscription)
-                .Where(p =>
-                    p.Status == "Successful" &&
-                    p.SubscriptionId.HasValue &&
-                    p.Subscription != null &&
-                    (p.AccountId == accountId || p.Subscription.AccountId == accountId) &&
-                    p.Subscription.IsActive == true &&
-                    (p.Subscription.StartDate == null || p.Subscription.StartDate <= now) &&
-                    (p.Subscription.EndDate == null || p.Subscription.EndDate >= now) &&
-                    (!p.Subscription.RemainingSwaps.HasValue || p.Subscription.RemainingSwaps > 0)
-                )
-                .OrderByDescending(p => p.CreateDate)
-                .FirstOrDefaultAsync();
-        }
-
+        return _context.Payments
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.TransactionReference == normalizedReference, cancellationToken);
     }
 }
+
+

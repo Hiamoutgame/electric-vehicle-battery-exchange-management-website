@@ -1,25 +1,22 @@
 ﻿using EV_BatteryChangeStation_Repository.IRepositories;
 using Microsoft.EntityFrameworkCore.Storage;
 
+namespace EV_BatteryChangeStation_Repository.UnitOfWork;
 
-namespace EV_BatteryChangeStation_Repository.UnitOfWork
+public interface IUnitOfWork
 {
-    public interface IUnitOfWork
-    {
-        IAccountReporitory AccountRepository { get; }
-        IRoleRepository RoleRepository { get; }
-        IStationRepository StationRepository { get; }
-        IBookingRepository BookingRepository { get; }
-        IFeedBackRepository FeedBackRepository { get; }
-        Task<int> CommitAsync();
-        IBatteryRepository BatteryRepository { get; }
-        ICarRepository CarRepository { get; }
-        ISubscriptionRepository SubscriptionRepository { get; }
-        ISupportRequestRepository SupportRequestRepository { get; }
-        ISwappingTransactionRepository SwappingTransactionRepository { get; }
-        IPaymentRepository PaymentRepository { get; }
-        IRevenueRepository RevenueRepository { get; }
-        Task<IDbContextTransaction> BeginTransactionAsync();
-
-    }
+    IAccountRepository AccountRepository { get; }
+    IStationRepository StationRepository { get; }
+    IBatteryRepository BatteryRepository { get; }
+    IVehicleRepository VehicleRepository { get; }
+    ISubscriptionRepository SubscriptionRepository { get; }
+    IBookingRepository BookingRepository { get; }
+    ISwapRepository SwapRepository { get; }
+    IPaymentRepository PaymentRepository { get; }
+    ISupportRequestRepository SupportRequestRepository { get; }
+    IReportRepository ReportRepository { get; }
+    Task<int> CommitAsync(CancellationToken cancellationToken = default);
+    Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
 }
+
+

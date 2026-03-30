@@ -1,401 +1,261 @@
-﻿using EV_BatteryChangeStation_Common.DTOs.AccountDto;
-using EV_BatteryChangeStation_Common.Enum.ServiceResult;
+using EV_BatteryChangeStation_Common.DTOs.AccountDto;
+using EV_BatteryChangeStation_Repository.DBContext;
 using EV_BatteryChangeStation_Repository.Entities;
-using EV_BatteryChangeStation_Repository.Mapper;
 using EV_BatteryChangeStation_Repository.UnitOfWork;
 using EV_BatteryChangeStation_Service.Base;
 using EV_BatteryChangeStation_Service.InternalService.IService;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.Identity.Client;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 
-namespace EV_BatteryChangeStation_Service.InternalService.Service
+namespace EV_BatteryChangeStation_Service.InternalService.Service;
+
+public sealed class AccountService : IAccountService
 {
-    public class AccountService : IAccountService
+    private readonly AppDbContext _context;
+    private readonly IPasswordHasher<Account> _passwordHasher;
+    private readonly IUnitOfWork _unitOfWork;
+
+    public AccountService(AppDbContext context, IUnitOfWork unitOfWork, IPasswordHasher<Account> passwordHasher)
     {
-        private readonly IUnitOfWork _unitOfWork;
-        private readonly IPasswordHasher<Account> _passwordHasher;
-
-        public AccountService(IUnitOfWork unitOfWork, IPasswordHasher<Account> passwordHasher)
-        {
-            _unitOfWork = unitOfWork ?? throw new ArgumentException(nameof(unitOfWork));
-            _passwordHasher = passwordHasher ?? throw new ArgumentException(nameof(passwordHasher));
-        }
-
-        public async Task<IServiceResult> CreateAccountAsync(CreateAccountDTO createAccount)
-        {
-            try
-            {
-                if (createAccount == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = "CreateAccountDTO object is null",
-                        Data = null
-                    };
-                }
-
-
-                var account = createAccount.MapToEntity();
-
-
-                account.Password = _passwordHasher.HashPassword(account, account.Password);
-                account.Status = true; 
-                await _unitOfWork.AccountRepository.CreateAsync(account);
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_CREATE_CODE,
-                    Message = Const.SUCCESS_CREATE_MSG,
-                    Data = account
-                };
-            }
-            catch (Exception ex)
-            {
-                throw new Exception(ex.Message);
-            }
-        }
-
-        public async Task<IServiceResult> DeleteAccountAsync(Guid encodedId)
-        {
-            try
-            {
-                if (encodedId == Guid.Empty)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = Const.ERROR_INVALID_DATA_MSG
-                    };
-                }
-                var acc = await _unitOfWork.AccountRepository.GetByIdAsync(encodedId);
-                if (acc == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = Const.WARNING_NO_DATA_MSG
-                    };
-                }
-                await _unitOfWork.AccountRepository.RemoveAsync(acc);
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_DELETE_CODE,
-                    Message = Const.SUCCESS_DELETE_MSG,
-                };
-            }
-            
-            catch (Exception ex)
-            {
-                var errorMessage = ex.InnerException?.Message ?? ex.Message;
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message
-                };
-            }
-        }
-
-        public async Task<IServiceResult> GetAccountByNameAsync(string accountName)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(accountName))
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.FAIL_READ_CODE,
-                        Message = Const.FAIL_READ_MSG
-                    };
-                }
-                var account = await _unitOfWork.AccountRepository.GetAccountByAccountName(accountName);
-                if(account == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = Const.WARNING_NO_DATA_MSG
-                    };
-                }
-                var accountDto = account.MapToDTO();
-
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_READ_CODE,
-                    Message = Const.SUCCESS_READ_MSG,
-                    Data = accountDto
-                };
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.FAIL_READ_CODE,
-                    Message = ex.Message
-                };
-            }
-        }
-        ////Lấy tất cả tài khoản với id mã hóa
-        //public async Task<IServiceResult> GetAllAccountWithIdDecodeAsync()
-        //{
-        //    try
-        //    {
-        //        var account = await _unitOfWork.AccountRepository.GetAllAsync();
-        //        if (account == null || !account.Any())
-        //        {
-        //            return new ServiceResult
-        //            {
-        //                Status = Const.ERROR_VALIDATION_CODE,
-        //                Message = "No accounts found",
-        //                Data = null
-        //            };
-        //        }
-        //        var result = account.Select(a => new ViewAccountDTOs
-        //        {
-        //            AccountId = _hashids.Encode(a.AccountId),
-        //            AccountName = a.AccountName,
-        //            FullName = a.FullName,
-        //            Password = a.Password,
-        //            Address = a.Address,
-        //            Status = a.Status,
-        //            PhoneNumber = a.PhoneNumber,
-        //            Gender = a.Gender,
-        //            DateOfBirth = a.DateOfBirth
-        //        }).ToList();
-
-        //        return new ServiceResult
-        //        {
-        //            Status = Const.SUCCESS_READ_CODE,
-        //            Message = Const.SUCCESS_READ_MSG,
-        //            Data = result
-        //        };
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        return new ServiceResult
-        //        {
-        //            Status = Const.ERROR_VALIDATION_CODE,
-        //            Message = ex.Message,
-        //        };
-        //    }
-        //}
-        // Lấy tất cả tài khoản
-        public async Task<IServiceResult> GetAllAccountsAsync()
-        {
-            try
-            {
-                var accounts = await _unitOfWork.AccountRepository.GetAllWithRoleAsync();
-
-                if (accounts == null || !accounts.Any())
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = "No accounts found",
-                        Data = null
-                    };
-                }
-                var accountDtos = accounts.Select(a => new ViewAccountDTOs
-                {
-                    RoleId = a.RoleId,
-                    AccountId = a.AccountId,
-                    Email = a.Email,
-                    AccountName = a.AccountName,
-                    FullName = a.FullName,
-                    Password = a.Password,
-                    Address = a.Address,
-                    Status = a.Status,
-                    PhoneNumber = a.PhoneNumber,
-                    Gender = a.Gender,
-                    DateOfBirth = a.DateOfBirth
-                }).ToList();
-
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_READ_CODE,
-                    Message = Const.SUCCESS_READ_MSG,
-                    Data = accountDtos
-                };
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                    Data = null
-                };
-            }
-        }
-
-        public async Task<IServiceResult> GetAccountProfileAsync(Guid accountId)
-        {
-            try
-            {
-                if (accountId == Guid.Empty)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.FAIL_READ_CODE,
-                        Message = "Account ID is required"
-                    };
-                }
-
-                var account = await _unitOfWork.AccountRepository.GetAllWithRoleAndStation(accountId);
-                if (account == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = "Account not found"
-                    };
-                }
-
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_READ_CODE,
-                    Message = Const.SUCCESS_READ_MSG,
-                    Data = new
-                    {
-                        account.AccountId,
-                        account.AccountName,
-                        account.FullName,
-                        account.Email,
-                        account.PhoneNumber,
-                        account.Address,
-                        account.Status,
-                        account.RoleId,
-                        RoleName = account.Role?.RoleName,
-                        account.StationId,
-                        StationName = account.Station?.StationName
-                    }
-                };
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message
-                };
-            }
-        }
-
-        public async Task<IServiceResult> UpdateAccountAsync(UpdateAccountDTO updateAccount)
-        {
-            try
-            {
-                if (updateAccount == null || updateAccount.AccountId == Guid.Empty)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.FAIL_UPDATE_CODE,
-                        Message = Const.FAIL_UPDATE_MSG
-                    };
-                }
-                var account = await _unitOfWork.AccountRepository.GetByIdAsync(updateAccount.AccountId);
-                if (account == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.FAIL_UPDATE_CODE,
-                        Message = Const.FAIL_UPDATE_MSG
-                    };
-                }
-
-                account.MaptoUpdate(updateAccount);
-                account.Password = _passwordHasher.HashPassword(account, updateAccount.Password);
-                await _unitOfWork.AccountRepository.UpdateAsync(account);
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_UPDATE_CODE,
-                    Message = Const.SUCCESS_UPDATE_MSG
-                };
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message
-                };
-            }
-        }
-
-        public async Task<IServiceResult> SoftDeleteAsync(Guid encodedId)
-        {
-            try
-            {
-                if (encodedId == Guid.Empty)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = Const.ERROR_INVALID_DATA_MSG,
-                    };
-                }
-                var acc = await _unitOfWork.AccountRepository.GetByIdAsync(encodedId);
-                if (acc == null)
-                {
-                    return new ServiceResult()
-                    {
-                        Status = Const.WARNING_NO_DATA_CODE,
-                        Message = Const.WARNING_NO_DATA_MSG,
-                    };
-                }
-                acc.Status = false;
-                await _unitOfWork.AccountRepository.UpdateAsync(acc);
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_UPDATE_CODE,
-                    Message = Const.SUCCESS_UPDATE_MSG,
-                    Data = acc
-                };
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                };
-            }
-        }
-
-        public async Task<IServiceResult> GetAllStaffAccountAsync()
-        {
-            try
-            {
-                var check = await _unitOfWork.AccountRepository.GetAllStaffAsync();
-                if (check == null)
-                {
-                    return new ServiceResult
-                    {
-                        Status = Const.ERROR_VALIDATION_CODE,
-                        Message = Const.ERROR_INVALID_DATA_MSG,
-                    };
-                }
-                var staff = check.MapToDTO();
-                return new ServiceResult
-                {
-                    Status = Const.SUCCESS_READ_CODE,
-                    Message = Const.SUCCESS_READ_MSG,
-                    Data = staff
-                };
-            }
-            catch (Exception ex)
-            {
-                return new ServiceResult
-                {
-                    Status = Const.ERROR_EXCEPTION,
-                    Message = ex.Message,
-                };
-            }
-        }
+        _context = context;
+        _unitOfWork = unitOfWork;
+        _passwordHasher = passwordHasher;
     }
 
+    public async Task<IServiceResult> CreateAccountAsync(CreateAccountDTO createAccount)
+    {
+        if (string.IsNullOrWhiteSpace(createAccount.AccountName) ||
+            string.IsNullOrWhiteSpace(createAccount.Password) ||
+            string.IsNullOrWhiteSpace(createAccount.Email))
+        {
+            return ServiceResponse.BadRequest("Username, password and email are required.");
+        }
+
+        var role = await _context.Roles.FirstOrDefaultAsync(x => x.RoleId == createAccount.RoleId);
+        if (role is null)
+        {
+            return ServiceResponse.NotFound("Role not found.");
+        }
+
+        if (await _unitOfWork.AccountRepository.UsernameExistsAsync(createAccount.AccountName))
+        {
+            return ServiceResponse.Conflict("Username already exists.");
+        }
+
+        if (await _unitOfWork.AccountRepository.EmailExistsAsync(createAccount.Email))
+        {
+            return ServiceResponse.Conflict("Email already exists.");
+        }
+
+        var account = new Account
+        {
+            AccountId = Guid.NewGuid(),
+            Username = createAccount.AccountName.Trim(),
+            Email = createAccount.Email.Trim(),
+            FullName = createAccount.FullName?.Trim(),
+            PhoneNumber = createAccount.PhoneNumber?.Trim(),
+            Gender = createAccount.Gender?.Trim(),
+            Address = createAccount.Address?.Trim(),
+            DateOfBirth = createAccount.DateOfBirth,
+            RoleId = role.RoleId,
+            Status = "ACTIVE",
+            CreateDate = DateTime.UtcNow
+        };
+        account.PasswordHash = _passwordHasher.HashPassword(account, createAccount.Password);
+
+        _context.Accounts.Add(account);
+
+        if (string.Equals(role.RoleName, "STAFF", StringComparison.OrdinalIgnoreCase) &&
+            createAccount.StationId != Guid.Empty)
+        {
+            var stationExists = await _context.Stations.AnyAsync(x => x.StationId == createAccount.StationId);
+            if (!stationExists)
+            {
+                return ServiceResponse.NotFound("Assigned station not found.");
+            }
+
+            _context.StationStaffAssignments.Add(new StationStaffAssignment
+            {
+                AssignmentId = Guid.NewGuid(),
+                StaffId = account.AccountId,
+                StationId = createAccount.StationId,
+                EffectiveFrom = DateOnly.FromDateTime(DateTime.UtcNow),
+                Status = "ACTIVE",
+                CreateDate = DateTime.UtcNow
+            });
+        }
+
+        await _unitOfWork.CommitAsync();
+        account.Role = role;
+
+        return ServiceResponse.Created("Account created successfully.", account.ToViewDto(createAccount.StationId));
+    }
+
+    public async Task<IServiceResult> UpdateAccountAsync(UpdateAccountDTO updateAccount)
+    {
+        var account = await _context.Accounts
+            .Include(x => x.Role)
+            .Include(x => x.StationAssignments)
+            .FirstOrDefaultAsync(x => x.AccountId == updateAccount.AccountId);
+
+        if (account is null)
+        {
+            return ServiceResponse.NotFound("Account not found.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(updateAccount.AccountName) &&
+            !string.Equals(updateAccount.AccountName.Trim(), account.Username, StringComparison.Ordinal))
+        {
+            if (await _unitOfWork.AccountRepository.UsernameExistsAsync(updateAccount.AccountName, account.AccountId))
+            {
+                return ServiceResponse.Conflict("Username already exists.");
+            }
+
+            account.Username = updateAccount.AccountName.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(updateAccount.Email) &&
+            !string.Equals(updateAccount.Email.Trim(), account.Email, StringComparison.OrdinalIgnoreCase))
+        {
+            if (await _unitOfWork.AccountRepository.EmailExistsAsync(updateAccount.Email, account.AccountId))
+            {
+                return ServiceResponse.Conflict("Email already exists.");
+            }
+
+            account.Email = updateAccount.Email.Trim();
+        }
+
+        if (updateAccount.RoleId.HasValue)
+        {
+            var roleExists = await _context.Roles.AnyAsync(x => x.RoleId == updateAccount.RoleId.Value);
+            if (!roleExists)
+            {
+                return ServiceResponse.NotFound("Role not found.");
+            }
+
+            account.RoleId = updateAccount.RoleId.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(updateAccount.Password))
+        {
+            account.PasswordHash = _passwordHasher.HashPassword(account, updateAccount.Password);
+        }
+
+        account.FullName = updateAccount.FullName?.Trim() ?? account.FullName;
+        account.PhoneNumber = updateAccount.PhoneNumber?.Trim() ?? account.PhoneNumber;
+        account.Gender = updateAccount.Gender?.Trim() ?? account.Gender;
+        account.Address = updateAccount.Address?.Trim() ?? account.Address;
+        account.DateOfBirth = updateAccount.DateOfBirth ?? account.DateOfBirth;
+        account.UpdateDate = DateTime.UtcNow;
+
+        if (updateAccount.StationId.HasValue && updateAccount.StationId.Value != Guid.Empty)
+        {
+            var stationExists = await _context.Stations.AnyAsync(x => x.StationId == updateAccount.StationId.Value);
+            if (!stationExists)
+            {
+                return ServiceResponse.NotFound("Assigned station not found.");
+            }
+
+            var activeAssignment = account.StationAssignments.FirstOrDefault(x => x.Status == "ACTIVE");
+            if (activeAssignment is null)
+            {
+                _context.StationStaffAssignments.Add(new StationStaffAssignment
+                {
+                    AssignmentId = Guid.NewGuid(),
+                    StaffId = account.AccountId,
+                    StationId = updateAccount.StationId.Value,
+                    EffectiveFrom = DateOnly.FromDateTime(DateTime.UtcNow),
+                    Status = "ACTIVE",
+                    CreateDate = DateTime.UtcNow
+                });
+            }
+            else
+            {
+                activeAssignment.StationId = updateAccount.StationId.Value;
+                activeAssignment.UpdateDate = DateTime.UtcNow;
+            }
+        }
+
+        await _unitOfWork.CommitAsync();
+        return ServiceResponse.Ok("Account updated successfully.", account.ToViewDto(updateAccount.StationId));
+    }
+
+    public async Task<IServiceResult> DeleteAccountAsync(Guid id)
+    {
+        var account = await _context.Accounts.FirstOrDefaultAsync(x => x.AccountId == id);
+        if (account is null)
+        {
+            return ServiceResponse.NotFound("Account not found.");
+        }
+
+        _context.Accounts.Remove(account);
+        await _unitOfWork.CommitAsync();
+        return ServiceResponse.Ok("Account deleted successfully.");
+    }
+
+    public async Task<IServiceResult> GetAllAccountsAsync()
+    {
+        var accounts = await _unitOfWork.AccountRepository.GetAccountsAsync();
+        return ServiceResponse.Ok("Accounts retrieved successfully.", accounts.Select(x => x.ToViewDto()).ToList());
+    }
+
+    public async Task<IServiceResult> GetAccountProfileAsync(Guid accountId)
+    {
+        var account = await _unitOfWork.AccountRepository.GetByIdWithRoleAsync(accountId);
+        if (account is null)
+        {
+            return ServiceResponse.NotFound("Account not found.");
+        }
+
+        var activeAssignment = account.StationAssignments.FirstOrDefault(x => x.Status == "ACTIVE");
+
+        return ServiceResponse.Ok("Account profile retrieved successfully.", new
+        {
+            account.AccountId,
+            account.Username,
+            account.Email,
+            account.FullName,
+            account.PhoneNumber,
+            account.Gender,
+            account.Address,
+            account.DateOfBirth,
+            account.Status,
+            roleName = account.Role?.RoleName,
+            stationId = activeAssignment?.StationId,
+            stationName = activeAssignment?.Station?.StationName
+        });
+    }
+
+    public async Task<IServiceResult> GetAccountByNameAsync(string accountName)
+    {
+        if (string.IsNullOrWhiteSpace(accountName))
+        {
+            return ServiceResponse.BadRequest("Account name is required.");
+        }
+
+        var account = await _unitOfWork.AccountRepository.GetByUsernameWithRoleAsync(accountName);
+        return account is null
+            ? ServiceResponse.NotFound("Account not found.")
+            : ServiceResponse.Ok("Account retrieved successfully.", account.ToViewDto());
+    }
+
+    public async Task<IServiceResult> SoftDeleteAsync(Guid id)
+    {
+        var account = await _context.Accounts.FirstOrDefaultAsync(x => x.AccountId == id);
+        if (account is null)
+        {
+            return ServiceResponse.NotFound("Account not found.");
+        }
+
+        account.Status = "INACTIVE";
+        account.UpdateDate = DateTime.UtcNow;
+        await _unitOfWork.CommitAsync();
+        return ServiceResponse.Ok("Account deactivated successfully.");
+    }
+
+    public async Task<IServiceResult> GetAllStaffAccountAsync()
+    {
+        var accounts = await _unitOfWork.AccountRepository.GetAccountsAsync("STAFF", "ACTIVE");
+        return ServiceResponse.Ok("Staff accounts retrieved successfully.", accounts.Select(x => x.ToViewDto()).ToList());
+    }
 }
