@@ -1,212 +1,199 @@
--- ==========================================================
--- DATABASE: EVBatterySwap (OPTIMIZED VERSION)
--- Đã giải quyết:
--- 1. Truy vết Pin cũ (Returned Battery)
--- 2. Chuẩn hóa Gói thuê pin (Subscription Normalization)
--- 3. Trạng thái Pin chi tiết (Charging, Maintenance, etc.)
--- 4. Dữ liệu Snapshot cho AI Forecasting
--- 5. Nhật ký hành trình Pin (Battery Lifecycle)
--- ==========================================================
+# EVBatterySwap Mermaid ERD
 
-CREATE DATABASE EVBatterySwap_v2;
-GO
-USE EVBatterySwap_v2;
-GO
+Source SQL schema: `../SWP_EVBatteryChangeStation_BE/Database/EVBatterySwap.sql`
 
--- 1. PHÂN QUYỀN & NGƯỜI DÙNG
-CREATE TABLE Role (
-RoleID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-RoleName NVARCHAR(100) NOT NULL,
-Status BIT NOT NULL DEFAULT 1,
-CreateDate DATETIME DEFAULT GETDATE()
-);
+```mermaid
+erDiagram
+    ROLE {
+        UNIQUEIDENTIFIER RoleID PK
+        NVARCHAR RoleName
+        BIT Status
+        DATETIME CreateDate
+    }
 
-CREATE TABLE Station (
-StationID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-StationName NVARCHAR(100) NOT NULL,
-Address NVARCHAR(255),
-PhoneNumber NVARCHAR(20),
-Status NVARCHAR(50) DEFAULT 'Active', -- Active, Maintenance, Offline
-MaxCapacity INT, -- Sức chứa tối đa của trạm
-CurrentBatteryCount INT DEFAULT 0
-);
+    STATION {
+        UNIQUEIDENTIFIER StationID PK
+        NVARCHAR StationName
+        NVARCHAR Address
+        NVARCHAR PhoneNumber
+        NVARCHAR Status
+        INT MaxCapacity
+        INT CurrentBatteryCount
+    }
 
-CREATE TABLE Account (
-AccountID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-Username NVARCHAR(100) UNIQUE NOT NULL,
-PasswordHash NVARCHAR(MAX) NOT NULL,
-FullName NVARCHAR(150),
-Email NVARCHAR(150) UNIQUE,
-PhoneNumber NVARCHAR(20),
-RoleID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Role(RoleID),
-StationID UNIQUEIDENTIFIER NULL FOREIGN KEY REFERENCES Station(StationID), -- Dành cho Staff trực trạm
-Status BIT DEFAULT 1,
-CreateDate DATETIME DEFAULT GETDATE(),
-UpdateDate DATETIME NULL,
-UpdatedBy UNIQUEIDENTIFIER NULL
-);
+    ACCOUNT {
+        UNIQUEIDENTIFIER AccountID PK
+        NVARCHAR Username
+        NVARCHAR PasswordHash
+        NVARCHAR FullName
+        NVARCHAR Email
+        NVARCHAR PhoneNumber
+        UNIQUEIDENTIFIER RoleID FK
+        UNIQUEIDENTIFIER StationID FK
+        BIT Status
+        DATETIME CreateDate
+    }
 
--- 2. TÀI SẢN (ASSETS) & TƯƠNG THÍCH
-CREATE TABLE VehicleModel (
-ModelID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-ModelName NVARCHAR(100) NOT NULL,
-Producer NVARCHAR(100),
-CompatibleBatteryType NVARCHAR(100) -- Ràng buộc loại pin có thể dùng
-);
+    VEHICLE_MODEL {
+        UNIQUEIDENTIFIER ModelID PK
+        NVARCHAR ModelName
+        NVARCHAR Producer
+        NVARCHAR CompatibleBatteryType
+    }
 
-CREATE TABLE Vehicle (
-VehicleID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-LicensePlate NVARCHAR(20) UNIQUE,
-ModelID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES VehicleModel(ModelID),
-OwnerID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Account(AccountID),
-CurrentBatteryID UNIQUEIDENTIFIER NULL, -- Pin hiện đang nằm trong xe
-Status NVARCHAR(50) DEFAULT 'Active'
-);
+    VEHICLE {
+        UNIQUEIDENTIFIER VehicleID PK
+        NVARCHAR LicensePlate
+        UNIQUEIDENTIFIER ModelID FK
+        UNIQUEIDENTIFIER OwnerID FK
+        UNIQUEIDENTIFIER CurrentBatteryID
+        NVARCHAR Status
+    }
 
-CREATE TABLE Battery (
-BatteryID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-SerialNumber NVARCHAR(100) UNIQUE NOT NULL,
-TypeBattery NVARCHAR(100) NOT NULL,
-Capacity_kWh DECIMAL(10,2),
-StateOfHealth DECIMAL(5,2), -- SoH (%)
-CurrentChargeLevel DECIMAL(5,2), -- % Pin hiện tại
-Status NVARCHAR(50) NOT NULL, -- Available, Charging, Maintenance, In-Vehicle, Faulty
-StationID UNIQUEIDENTIFIER NULL FOREIGN KEY REFERENCES Station(StationID), -- NULL nếu đang ở trong xe
-InsuranceDate DATE,
-CreateDate DATETIME DEFAULT GETDATE()
-);
+    BATTERY {
+        UNIQUEIDENTIFIER BatteryID PK
+        NVARCHAR SerialNumber
+        NVARCHAR TypeBattery
+        DECIMAL Capacity_kWh
+        DECIMAL StateOfHealth
+        DECIMAL CurrentChargeLevel
+        NVARCHAR Status
+        UNIQUEIDENTIFIER StationID FK
+        DATE InsuranceDate
+        DATETIME CreateDate
+    }
 
--- Bảng quan trọng: Lưu lại lịch sử di chuyển của Pin để AI phân tích vòng đời
-CREATE TABLE BatteryHistory (
-HistoryID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-BatteryID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Battery(BatteryID),
-FromStationID UNIQUEIDENTIFIER NULL FOREIGN KEY REFERENCES Station(StationID),
-ToStationID UNIQUEIDENTIFIER NULL FOREIGN KEY REFERENCES Station(StationID),
-ActionType NVARCHAR(50), -- Swap_In, Swap_Out, Maintenance, Charging_Finish
-EventDate DATETIME DEFAULT GETDATE(),
-SoH_AtTime DECIMAL(5,2),
-Note NVARCHAR(255)
-);
+    BATTERY_HISTORY {
+        UNIQUEIDENTIFIER HistoryID PK
+        UNIQUEIDENTIFIER BatteryID FK
+        UNIQUEIDENTIFIER FromStationID FK
+        UNIQUEIDENTIFIER ToStationID FK
+        NVARCHAR ActionType
+        DATETIME EventDate
+        DECIMAL SoH_AtTime
+        NVARCHAR Note
+    }
 
--- 3. DỊCH VỤ & THUÊ BAO (NORMALIZED)
-CREATE TABLE SubscriptionPlan (
-PlanID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-PlanName NVARCHAR(100) NOT NULL,
-BasePrice DECIMAL(18,2) NOT NULL,
-SwapLimitPerMonth INT, -- NULL nếu không giới hạn
-Description NVARCHAR(MAX),
-IsActive BIT DEFAULT 1
-);
+    SUBSCRIPTION_PLAN {
+        UNIQUEIDENTIFIER PlanID PK
+        NVARCHAR PlanName
+        DECIMAL BasePrice
+        INT SwapLimitPerMonth
+        NVARCHAR Description
+        BIT IsActive
+    }
 
-CREATE TABLE UserSubscription (
-UserSubID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-AccountID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Account(AccountID),
-PlanID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES SubscriptionPlan(PlanID),
-StartDate DATETIME NOT NULL,
-EndDate DATETIME NOT NULL,
-RemainingSwaps INT,
-Status NVARCHAR(50) DEFAULT 'Active' -- Active, Expired, Cancelled
-);
+    USER_SUBSCRIPTION {
+        UNIQUEIDENTIFIER UserSubID PK
+        UNIQUEIDENTIFIER AccountID FK
+        UNIQUEIDENTIFIER PlanID FK
+        DATETIME StartDate
+        DATETIME EndDate
+        INT RemainingSwaps
+        NVARCHAR Status
+    }
 
--- 4. VẬN HÀNH (OPERATIONS)
-CREATE TABLE Booking (
-BookingID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-AccountID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Account(AccountID),
-VehicleID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Vehicle(VehicleID),
-StationID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Station(StationID),
-TargetTime DATETIME NOT NULL,
-Status NVARCHAR(50) DEFAULT 'Pending', -- Pending, Completed, Cancelled, Expired
-Notes NVARCHAR(255)
-);
+    BOOKING {
+        UNIQUEIDENTIFIER BookingID PK
+        UNIQUEIDENTIFIER AccountID FK
+        UNIQUEIDENTIFIER VehicleID FK
+        UNIQUEIDENTIFIER StationID FK
+        DATETIME TargetTime
+        NVARCHAR Status
+        NVARCHAR Notes
+    }
 
--- Cải tiến SwappingTransaction: Lưu cả pin trả và pin nhận
-CREATE TABLE SwappingTransaction (
-TransactionID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-BookingID UNIQUEIDENTIFIER NULL FOREIGN KEY REFERENCES Booking(BookingID),
-VehicleID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Vehicle(VehicleID),
-StaffID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Account(AccountID),
-StationID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Station(StationID),
+    SWAPPING_TRANSACTION {
+        UNIQUEIDENTIFIER TransactionID PK
+        UNIQUEIDENTIFIER BookingID FK
+        UNIQUEIDENTIFIER VehicleID FK
+        UNIQUEIDENTIFIER StaffID FK
+        UNIQUEIDENTIFIER StationID FK
+        UNIQUEIDENTIFIER ReturnedBatteryID FK
+        DECIMAL ReturnedBatterySoH
+        DECIMAL ReturnedBatteryCharge
+        UNIQUEIDENTIFIER ReleasedBatteryID FK
+        DECIMAL ReleasedBatterySoH
+        DECIMAL SwapFee
+        DATETIME CreateDate
+    }
 
-    ReturnedBatteryID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Battery(BatteryID), -- Pin khách trả lại
-    ReturnedBatterySoH DECIMAL(5,2),
-    ReturnedBatteryCharge DECIMAL(5,2),
+    STATION_INVENTORY_LOG {
+        UNIQUEIDENTIFIER LogID PK
+        UNIQUEIDENTIFIER StationID FK
+        DATETIME LogTime
+        INT AvailableBatteries
+        INT ChargingBatteries
+        INT MaintenanceBatteries
+        DECIMAL AvgChargeLevel
+    }
 
-    ReleasedBatteryID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Battery(BatteryID), -- Pin trạm cấp cho khách
-    ReleasedBatterySoH DECIMAL(5,2),
+    PAYMENT {
+        UNIQUEIDENTIFIER PaymentID PK
+        UNIQUEIDENTIFIER AccountID FK
+        DECIMAL Amount
+        NVARCHAR PaymentType
+        NVARCHAR PaymentMethod
+        NVARCHAR Status
+        NVARCHAR TransactionReference
+        DATETIME CreateDate
+    }
 
-    SwapFee DECIMAL(18,2) DEFAULT 0, -- Phí chênh lệch nếu có
-    CreateDate DATETIME DEFAULT GETDATE()
+    SUPPORT_REQUEST {
+        UNIQUEIDENTIFIER RequestID PK
+        UNIQUEIDENTIFIER AccountID FK
+        NVARCHAR IssueType
+        NVARCHAR Description
+        NVARCHAR Status
+        DATETIME CreateDate
+    }
 
-);
+    FEEDBACK {
+        UNIQUEIDENTIFIER FeedbackID PK
+        UNIQUEIDENTIFIER AccountID FK
+        UNIQUEIDENTIFIER TransactionID FK
+        INT Rating
+        NVARCHAR Comment
+        DATETIME CreateDate
+    }
 
--- 5. AI FORECASTING DATA (SNAPSHOTS)
--- Bảng này lưu trữ định kỳ trạng thái trạm để AI học nhu cầu theo giờ/ngày
-CREATE TABLE StationInventoryLog (
-LogID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-StationID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Station(StationID),
-LogTime DATETIME DEFAULT GETDATE(),
-AvailableBatteries INT,
-ChargingBatteries INT,
-MaintenanceBatteries INT,
-AvgChargeLevel DECIMAL(5,2)
-);
+    ROLE ||--o{ ACCOUNT : grants
+    STATION ||--o{ ACCOUNT : assigns
 
--- 6. THANH TOÁN & HỖ TRỢ
-CREATE TABLE Payment (
-PaymentID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-AccountID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Account(AccountID),
-Amount DECIMAL(18,2) NOT NULL,
-PaymentType NVARCHAR(50), -- Subscription_Buy, Swap_Extra_Fee
-PaymentMethod NVARCHAR(50), -- VNPAY, MoMo, CreditCard
-Status NVARCHAR(50) DEFAULT 'Pending',
-TransactionReference NVARCHAR(100),
-CreateDate DATETIME DEFAULT GETDATE()
-);
+    VEHICLE_MODEL ||--o{ VEHICLE : defines
+    ACCOUNT ||--o{ VEHICLE : owns
+    BATTERY o|--o| VEHICLE : current_battery_logical
 
-CREATE TABLE SupportRequest (
-RequestID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-AccountID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Account(AccountID),
-IssueType NVARCHAR(100),
-Description NVARCHAR(MAX),
-Status NVARCHAR(50) DEFAULT 'Open', -- Open, In_Progress, Resolved, Closed
-CreateDate DATETIME DEFAULT GETDATE()
-);
+    STATION ||--o{ BATTERY : stores
+    BATTERY ||--o{ BATTERY_HISTORY : tracks
+    STATION ||--o{ BATTERY_HISTORY : from_station
+    STATION ||--o{ BATTERY_HISTORY : to_station
 
-CREATE TABLE Feedback (
-FeedbackID UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
-AccountID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES Account(AccountID),
-TransactionID UNIQUEIDENTIFIER FOREIGN KEY REFERENCES SwappingTransaction(TransactionID),
-Rating INT CHECK (Rating BETWEEN 1 AND 5),
-Comment NVARCHAR(MAX),
-CreateDate DATETIME DEFAULT GETDATE()
-);
-GO
+    ACCOUNT ||--o{ USER_SUBSCRIPTION : has
+    SUBSCRIPTION_PLAN ||--o{ USER_SUBSCRIPTION : selected
 
--- ==========================================================
--- TRIGGERS & LOGIC CƠ BẢN
--- ==========================================================
+    ACCOUNT ||--o{ BOOKING : creates
+    VEHICLE ||--o{ BOOKING : books_for
+    STATION ||--o{ BOOKING : targets
 
--- Trigger cập nhật số lượng pin tại trạm và ghi log lịch sử khi Pin đổi trạng thái
-CREATE TRIGGER trg_Battery_LocationChange
-ON Battery
-AFTER UPDATE
-AS
-BEGIN
--- 1. Nếu StationID thay đổi, cập nhật CurrentBatteryCount ở trạm
-IF UPDATE(StationID)
-BEGIN
--- Giảm số lượng ở trạm cũ
-UPDATE Station
-SET CurrentBatteryCount = CurrentBatteryCount - 1
-FROM Station s JOIN Deleted d ON s.StationID = d.StationID
-WHERE d.StationID IS NOT NULL;
+    BOOKING ||--o{ SWAPPING_TRANSACTION : produces
+    VEHICLE ||--o{ SWAPPING_TRANSACTION : swaps_for
+    ACCOUNT ||--o{ SWAPPING_TRANSACTION : handled_by
+    STATION ||--o{ SWAPPING_TRANSACTION : occurs_at
+    BATTERY ||--o{ SWAPPING_TRANSACTION : returned_battery
+    BATTERY ||--o{ SWAPPING_TRANSACTION : released_battery
 
-        -- Tăng số lượng ở trạm mới
-        UPDATE Station
-        SET CurrentBatteryCount = CurrentBatteryCount + 1
-        FROM Station s JOIN Inserted i ON s.StationID = i.StationID
-        WHERE i.StationID IS NOT NULL;
-    END
+    STATION ||--o{ STATION_INVENTORY_LOG : snapshots
 
-END
-GO
+    ACCOUNT ||--o{ PAYMENT : pays
+    ACCOUNT ||--o{ SUPPORT_REQUEST : raises
+    ACCOUNT ||--o{ FEEDBACK : writes
+    SWAPPING_TRANSACTION ||--o{ FEEDBACK : receives
+```
+
+## Notes
+
+- `Vehicle.CurrentBatteryID` is shown as a logical relation for the ERD. In the current SQL, it is not declared as a foreign key.
+- `BatteryHistory` references `Station` twice to represent move origin and move destination.
+- `SwappingTransaction` references `Battery` twice to separate returned battery and released battery.
+- Trigger logic such as `trg_Battery_LocationChange` is not represented in Mermaid ERD and should stay in SQL documentation.
