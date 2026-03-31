@@ -50,23 +50,10 @@ public class AppDbContext : DbContext
             .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
             .Build();
 
-        var postgresConnection =
-            configuration.GetConnectionString("PostgresConnection") ??
-            configuration.GetConnectionString("PostgresV2Connection");
-
-        var sqlServerConnection =
-            configuration.GetConnectionString("DefaultConnection") ??
-            configuration.GetConnectionString("V2Connection");
-
-        if (!string.IsNullOrWhiteSpace(postgresConnection))
+        var connectionString = DatabaseConnectionResolver.GetConnectionString(configuration);
+        if (!string.IsNullOrWhiteSpace(connectionString))
         {
-            optionsBuilder.UseNpgsql(postgresConnection);
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(sqlServerConnection))
-        {
-            optionsBuilder.UseSqlServer(sqlServerConnection);
+            DatabaseConnectionResolver.Configure(optionsBuilder, connectionString);
         }
     }
 

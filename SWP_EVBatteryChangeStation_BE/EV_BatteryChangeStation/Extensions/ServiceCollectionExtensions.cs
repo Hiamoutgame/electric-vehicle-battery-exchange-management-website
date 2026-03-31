@@ -17,19 +17,10 @@ public static class ServiceCollectionExtensions
     {
         services.AddDbContext<AppDbContext>(options =>
         {
-            var postgresConnection = configuration.GetConnectionString("PostgresConnection")
-                ?? configuration.GetConnectionString("PostgresV2Connection");
+            var connectionString = DatabaseConnectionResolver.GetConnectionString(configuration)
+                ?? throw new InvalidOperationException("No database connection string was found.");
 
-            if (!string.IsNullOrWhiteSpace(postgresConnection))
-            {
-                options.UseNpgsql(postgresConnection);
-                return;
-            }
-
-            var sqlServerConnection = configuration.GetConnectionString("DefaultConnection")
-                ?? configuration.GetConnectionString("V2Connection");
-
-            options.UseSqlServer(sqlServerConnection);
+            DatabaseConnectionResolver.Configure(options, connectionString);
         });
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();

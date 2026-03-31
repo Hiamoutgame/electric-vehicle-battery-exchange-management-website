@@ -28,11 +28,7 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<App
                 .AddJsonFile("appsettings.json", optional: true)
                 .Build();
 
-            var hasConnectionString =
-                configuration.GetConnectionString("PostgresConnection") is not null ||
-                configuration.GetConnectionString("PostgresV2Connection") is not null ||
-                configuration.GetConnectionString("DefaultConnection") is not null ||
-                configuration.GetConnectionString("V2Connection") is not null;
+            var hasConnectionString = !string.IsNullOrWhiteSpace(DatabaseConnectionResolver.GetConnectionString(configuration));
 
             if (hasConnectionString)
             {
@@ -44,28 +40,16 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<App
             .SetBasePath(currentDirectory)
             .Build();
 
-        var postgresConnection =
-            configuration.GetConnectionString("PostgresConnection") ??
-            configuration.GetConnectionString("PostgresV2Connection");
-
-        var sqlServerConnection =
-            configuration.GetConnectionString("DefaultConnection") ??
-            configuration.GetConnectionString("V2Connection");
+        var connectionString = DatabaseConnectionResolver.GetConnectionString(configuration);
 
         var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
 
-        if (!string.IsNullOrWhiteSpace(postgresConnection))
-        {
-            optionsBuilder.UseNpgsql(postgresConnection);
-        }
-        else if (!string.IsNullOrWhiteSpace(sqlServerConnection))
-        {
-            optionsBuilder.UseSqlServer(sqlServerConnection);
-        }
-        else
+        if (string.IsNullOrWhiteSpace(connectionString))
         {
             throw new InvalidOperationException("No database connection string was found for design-time AppDbContext creation.");
         }
+
+        DatabaseConnectionResolver.Configure(optionsBuilder, connectionString);
 
         return new AppDbContext(optionsBuilder.Options);
     }
