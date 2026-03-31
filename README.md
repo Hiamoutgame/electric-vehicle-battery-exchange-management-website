@@ -1,384 +1,267 @@
-# Electric Vehicle Battery Exchange Management System
+# Electric Vehicle Battery Exchange Management Website
 
-A full-stack web application for managing electric vehicle battery exchange stations, built with .NET 8.0 backend and React frontend.
+Full-stack project for managing EV battery swap stations, drivers, station staff, subscriptions, payments, and support requests.
 
-## Project Description
+## Tech stack
 
-**Tech Stack:** React (Vite) frontend, .NET 8.0 (C#) backend with Entity Framework Core, SQL Server, and VietMap API integration. **Key Contributions:** Developed frontend React components, integrated VietMap API for interactive maps and route visualization, and configured CORS policies and port settings in the C# backend. **Learning Outcomes:** Gained experience in API setup and consumption, React component development with asset/template management, and backend configuration including database connections, JWT authentication, and CORS middleware.
+- Backend: ASP.NET Core Web API, .NET 8, Entity Framework Core
+- Database: PostgreSQL
+- Frontend: React 19, Vite
+- Auth: JWT Bearer
+- API base path: `/api/v1`
 
-## Table of Contents
+## Repository structure
 
-- [Prerequisites](#prerequisites)
-- [Project Structure](#project-structure)
-- [Backend Setup (C# .NET 8.0)](#backend-setup-c-net-80)
-- [Frontend Setup (React + Vite)](#frontend-setup-react--vite)
-- [Database Setup](#database-setup)
-- [Configuration](#configuration)
-- [Running the Application](#running-the-application)
-- [API Documentation](#api-documentation)
-- [Troubleshooting](#troubleshooting)
+```text
+electric-vehicle-battery-exchange-management-website/
+|-- Docs/
+|-- SWP_EVBatteryChangeStation_BE/
+|   |-- EV_BatteryChangeStation/                # API project
+|   |-- EV_BatteryChangeStation_Service/        # Business logic
+|   |-- EV_BatteryChangeStation_Repository/     # EF Core + migrations
+|   |-- EV_BatteryChangeStation_Common/         # Shared DTOs / helpers
+|   `-- EV_BatteryChangeStation.sln
+`-- SWP_EVBatteryChangeStation_FE/
+    |-- src/
+    `-- package.json
+```
 
----
+## Main modules
+
+- Public station search and station detail
+- Auth: register, OTP verify, login, logout, current profile
+- Driver: vehicles, bookings, current subscription, payments, swap history, support requests, feedback
+- Staff: station context, station bookings, battery inventory, swap completion, support response, payment record
+- Admin: station management, user list, subscription plan management, support requests, revenue report
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed:
+- .NET SDK 8.x
+- Node.js 18+ and npm
+- PostgreSQL 15+ running locally
+- Git
 
-### For Backend:
-- **.NET SDK 8.0** or later ([Download](https://dotnet.microsoft.com/download))
-- **SQL Server 2019+** or **SQL Server Express** ([Download](https://www.microsoft.com/en-us/sql-server/sql-server-downloads))
-- **Visual Studio 2022** or **Visual Studio Code** (optional, but recommended)
-- **Docker Desktop** (optional, for containerized setup)
+Recommended:
 
-### For Frontend:
-- **Node.js 18+** and **npm** ([Download](https://nodejs.org/))
-- **Git** ([Download](https://git-scm.com/))
+- Visual Studio 2022 or VS Code
+- DBeaver / pgAdmin for PostgreSQL
 
----
+## Local setup
 
-## Project Structure
-
-```
-electric-vehicle-battery-exchange-management-website/
-├── SWP_EVBatteryChangeStation_BE/     # Backend (.NET 8.0)
-│   ├── EV_BatteryChangeStation/      # Main API project
-│   ├── EV_BatteryChangeStation_Repository/  # Data access layer
-│   ├── EV_BatteryChangeStation_Service/     # Business logic layer
-│   ├── EV_BatteryChangeStation_Common/      # Shared utilities
-│   ├── Database/                     # SQL scripts
-│   └── docker-compose.yml            # Docker configuration
-│
-└── SWP_EVBatteryChangeStation_FE/     # Frontend (React + Vite)
-    ├── src/                          # Source code
-    ├── public/                       # Static assets
-    └── package.json                  # Dependencies
-```
-
----
-
-## Backend Setup (C# .NET 8.0)
-
-### Option 1: Using Docker Compose (Recommended for Quick Start)
-
-This method sets up both SQL Server and the backend API in containers.
-
-1. **Navigate to the backend directory:**
-   ```bash
-   cd SWP_EVBatteryChangeStation_BE
-   ```
-
-2. **Update database credentials in `docker-compose.yml`** (if needed):
-   ```yaml
-   environment:
-     - SA_PASSWORD=YourStrong@Password123
-   ```
-
-3. **Build and run containers:**
-   ```bash
-   docker-compose up -d
-   ```
-
-4. **Initialize the database:**
-   - The database will be created automatically
-   - Run the SQL script from `Database/EVBatterySwap.sql` to create tables and initial data
-   - You can execute it using SQL Server Management Studio (SSMS) or Azure Data Studio
-
-5. **Access the API:**
-   - API: http://localhost:8080
-   - Swagger UI: http://localhost:8080/swagger
-
-### Option 2: Direct .NET Run (Local Development)
-
-1. **Navigate to the backend directory:**
-   ```bash
-   cd SWP_EVBatteryChangeStation_BE
-   ```
-
-2. **Restore NuGet packages:**
-   ```bash
-   dotnet restore
-   ```
-
-3. **Configure the database connection:**
-   - Open `EV_BatteryChangeStation/appsettings.json`
-   - Update the `ConnectionStrings` section with your SQL Server credentials:
-   ```json
-   "ConnectionStrings": {
-     "DefaultConnection": "server=(local); database=EVBatterySwap; uid=sa; pwd=YOUR_PASSWORD; TrustServerCertificate=True"
-   }
-   ```
-
-4. **Set up the database:**
-   - Ensure SQL Server is running
-   - Create the database by running the script: `Database/EVBatterySwap.sql`
-   - Or use SQL Server Management Studio to execute the script
-
-5. **Run the application:**
-   ```bash
-   cd EV_BatteryChangeStation
-   dotnet run
-   ```
-
-6. **Access the API:**
-   - API: http://localhost:5204
-   - Swagger UI: http://localhost:5204/swagger
-
-### Option 3: Using Visual Studio
-
-1. **Open the solution:**
-   - Open `SWP_EVBatteryChangeStation_BE/EV_BatteryChangeStation.sln` in Visual Studio 2022
-
-2. **Set startup project:**
-   - Right-click on `EV_BatteryChangeStation` project → Set as Startup Project
-
-3. **Configure connection string:**
-   - Update `appsettings.json` with your database connection string
-
-4. **Run the application:**
-   - Press `F5` or click the Run button
-   - Swagger UI will open automatically
-
----
-
-## Frontend Setup (React + Vite)
-
-1. **Navigate to the frontend directory:**
-   ```bash
-   cd SWP_EVBatteryChangeStation_FE
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Create environment file:**
-   - Create a `.env` file in the `SWP_EVBatteryChangeStation_FE` directory
-   - Add the following configuration:
-   ```env
-   VITE_API_BASE_URL=http://localhost:5204
-   ```
-   
-   **Note:** If you're using Docker for the backend, use:
-   ```env
-   VITE_API_BASE_URL=http://localhost:8080
-   ```
-
-4. **Start the development server:**
-   ```bash
-   npm run dev
-   ```
-
-5. **Access the application:**
-   - Frontend: http://localhost:3000
-
-### Build for Production
-
-To create a production build:
+### 1. Clone repository
 
 ```bash
-npm run build
+git clone <your-repo-url>
+cd electric-vehicle-battery-exchange-management-website
 ```
 
-The optimized files will be in the `dist` directory.
+### 2. Backend setup
 
----
+Move to the backend folder:
 
-## Database Setup
+```bash
+cd SWP_EVBatteryChangeStation_BE
+```
 
-### Manual Setup
+Install / restore packages:
 
-1. **Install SQL Server:**
-   - Download and install SQL Server 2019 or later
-   - Or use SQL Server Express (free)
+```bash
+dotnet restore
+```
 
-2. **Create the database:**
-   - Open SQL Server Management Studio (SSMS) or Azure Data Studio
-   - Connect to your SQL Server instance
-   - Execute the script: `SWP_EVBatteryChangeStation_BE/Database/EVBatterySwap.sql`
-   - This will create the database and all required tables
+The solution is pinned to `.NET 8` in [`SWP_EVBatteryChangeStation_BE/global.json`](SWP_EVBatteryChangeStation_BE/global.json).
 
-3. **Verify the connection:**
-   - Update the connection string in `appsettings.json`
-   - Test the connection by running the backend
-
-### Using Docker (SQL Server Container)
-
-If you're using Docker Compose, SQL Server will be automatically set up. You still need to run the SQL script to create tables:
-
-1. **Connect to the containerized SQL Server:**
-   ```bash
-   docker exec -it evbattery-db /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P YourStrong@Password123
-   ```
-
-2. **Or use SSMS/Azure Data Studio:**
-   - Server: `localhost,1433`
-   - Username: `sa`
-   - Password: `YourStrong@Password123` (or the password you set in docker-compose.yml)
-
-3. **Execute the SQL script** to create tables and initial data
-
----
-
-## Configuration
-
-### Backend Configuration (`appsettings.json`)
-
-Key configuration sections:
+Configure PostgreSQL in [`SWP_EVBatteryChangeStation_BE/EV_BatteryChangeStation/appsettings.json`](SWP_EVBatteryChangeStation_BE/EV_BatteryChangeStation/appsettings.json):
 
 ```json
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "server=(local); database=EVBatterySwap; uid=sa; pwd=YOUR_PASSWORD; TrustServerCertificate=True"
-  },
-  "JwtConfig": {
-    "Key": "YOUR_JWT_SECRET_KEY",
-    "Issuer": "App",
-    "Audience": "App",
-    "ExpireMinutes": 30
-  },
-  "EmailSettings": {
-    "Email": "your-email@gmail.com",
-    "AppPassword": "your-app-password"
-  },
-  "AllowedOrigins": [
-    "http://localhost:3000"
-  ],
-  "Vnpay": {
-    "TmnCode": "YOUR_TMN_CODE",
-    "HashSecret": "YOUR_HASH_SECRET",
-    "BaseUrl": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
-    "ReturnUrl": "http://localhost:5204/api/VNPay/vnpay-return"
-  }
+"ConnectionStrings": {
+  "DefaultConnection": "Host=localhost;Port=5432;Database=ev_batteryChangeStation;Username=postgres;Password=YOUR_PASSWORD"
 }
 ```
 
-### Frontend Configuration (`.env`)
+Apply migrations and seed sample data:
 
-```env
-VITE_API_BASE_URL=http://localhost:5204
+```bash
+dotnet ef database update --project EV_BatteryChangeStation_Repository --startup-project EV_BatteryChangeStation
 ```
 
-**Important:** 
-- For Docker backend, use `http://localhost:8080`
-- For production, update with your production API URL
+Trust the local HTTPS developer certificate if needed:
 
----
+```bash
+dotnet dev-certs https --trust
+```
 
-## Running the Application
+Run backend:
 
-### Complete Setup Flow
+```bash
+dotnet run --project EV_BatteryChangeStation --launch-profile https
+```
 
-1. **Start the database:**
-   - Option A: Use Docker Compose (includes SQL Server)
-   - Option B: Ensure SQL Server is running locally
+Backend URLs:
 
-2. **Initialize the database:**
-   - Run the SQL script: `Database/EVBatterySwap.sql`
+- Swagger: `https://localhost:7071/swagger`
+- HTTPS API: `https://localhost:7071/api/v1`
+- HTTP API: `http://localhost:5204/api/v1`
 
-3. **Start the backend:**
-   ```bash
-   cd SWP_EVBatteryChangeStation_BE/EV_BatteryChangeStation
-   dotnet run
-   ```
-   - Or use Docker: `docker-compose up -d` (from backend directory)
+Note:
 
-4. **Start the frontend:**
-   ```bash
-   cd SWP_EVBatteryChangeStation_FE
-   npm run dev
-   ```
+- The app redirects HTTP to HTTPS in development.
+- Frontend should call the HTTPS URL directly to avoid redirect/CORS confusion.
 
-5. **Access the application:**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:5204 (or http://localhost:8080 for Docker)
-   - Swagger UI: http://localhost:5204/swagger (or http://localhost:8080/swagger for Docker)
+### 3. Frontend setup
 
----
+Open a second terminal:
 
-## API Documentation
+```bash
+cd SWP_EVBatteryChangeStation_FE
+npm install
+```
 
-Once the backend is running, you can access the interactive API documentation:
+Create or update `.env`:
 
-- **Swagger UI:** http://localhost:5204/swagger (or http://localhost:8080/swagger for Docker)
+```env
+VITE_API_BASE_URL=https://localhost:7071/api
+```
 
-The Swagger UI provides:
-- Complete API endpoint documentation
-- Interactive API testing
-- Request/response schemas
-- Authentication testing (JWT Bearer tokens)
+Optional frontend keys currently used by the repo:
 
-### Authentication
+```env
+VITE_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_KEY
+VITE_APP_VIETMAP_API_KEY=YOUR_VIETMAP_KEY
+```
 
-The API uses JWT (JSON Web Tokens) for authentication. To test protected endpoints:
+Run frontend:
 
-1. Use the `/api/Authen/login` endpoint to get a token
-2. Click the "Authorize" button in Swagger UI
-3. Enter: `Bearer YOUR_TOKEN_HERE`
-4. Now you can test protected endpoints
+```bash
+npm run dev
+```
 
----
+Frontend URL:
+
+- Vite default: `http://localhost:5173`
+
+The backend already allows common local origins such as `localhost:5173` and `localhost:3000`.
+
+## One-pass local run
+
+1. Start PostgreSQL
+2. Run backend migration:
+
+```bash
+cd SWP_EVBatteryChangeStation_BE
+dotnet ef database update --project EV_BatteryChangeStation_Repository --startup-project EV_BatteryChangeStation
+```
+
+3. Start backend:
+
+```bash
+dotnet run --project EV_BatteryChangeStation --launch-profile https
+```
+
+4. Start frontend:
+
+```bash
+cd ..\SWP_EVBatteryChangeStation_FE
+npm install
+npm run dev
+```
+
+## Seed data
+
+The current migrations seed sample data for:
+
+- Roles, permissions, accounts
+- Stations and station battery support
+- Vehicle models, vehicles, batteries, battery history
+- Subscription plans and user subscriptions
+- Bookings, swap transactions, battery return inspections
+- Inventory logs, payments
+- Support requests, responses, feedback
+
+This means after `dotnet ef database update`, the database is ready for demo/testing without manual inserts.
+
+## Auth and OTP flow
+
+Current local development behavior:
+
+- Register creates a pending account and OTP
+- OTP is logged in backend console/logs instead of relying on Gmail
+- OTP must be verified before login
+- Pending OTP is stored in memory, so restarting backend invalidates pending OTP sessions
+
+Sample log:
+
+```text
+LOCAL OTP [REGISTER] Email=user@example.com OTP=123456 ExpiresAtUtc=...
+```
+
+Role note:
+
+- Business docs use `DRIVER`
+- Current seeded database uses `CUSTOMER` as the driver-facing role equivalent
+
+## API documentation
+
+Reference docs in [`Docs/`](Docs):
+
+- [`Docs/BE_document_UserStory.md`](Docs/BE_document_UserStory.md)
+- [`Docs/BE_document_APIResult.md`](Docs/BE_document_APIResult.md)
+- [`Docs/BE_document_Structure.md`](Docs/BE_document_Structure.md)
+
+Main controller groups:
+
+- `/api/v1/auth`
+- `/api/v1/stations`
+- `/api/v1/driver`
+- `/api/v1/staff`
+- `/api/v1/admin`
 
 ## Troubleshooting
 
-### Backend Issues
+### Backend build fails because files are locked
 
-**Problem: Cannot connect to database**
-- Verify SQL Server is running
-- Check the connection string in `appsettings.json`
-- Ensure the database `EVBatterySwap` exists
-- For Docker, check if the SQL Server container is healthy: `docker ps`
+If you see `MSB3027` / `MSB3021`, stop the running backend process first, then build again.
 
-**Problem: Port already in use**
-- Change the port in `launchSettings.json` or `docker-compose.yml`
-- Or stop the process using the port
+### Browser shows CORS error on `http://localhost:5204`
 
-**Problem: JWT authentication fails**
-- Verify `JwtConfig` settings in `appsettings.json`
-- Ensure the JWT key is properly configured
+Use `https://localhost:7071/api` on the frontend. The backend redirects HTTP to HTTPS.
 
-### Frontend Issues
+### PostgreSQL says database does not exist
 
-**Problem: Cannot connect to backend API**
-- Verify the backend is running
-- Check `VITE_API_BASE_URL` in `.env` file
-- Ensure CORS is configured correctly in backend `appsettings.json`
-- Check browser console for CORS errors
+Run:
 
-**Problem: Dependencies installation fails**
-- Clear npm cache: `npm cache clean --force`
-- Delete `node_modules` and `package-lock.json`, then run `npm install` again
-- Ensure Node.js version is 18 or higher
+```bash
+dotnet ef database update --project EV_BatteryChangeStation_Repository --startup-project EV_BatteryChangeStation
+```
 
-**Problem: Build errors**
-- Check Node.js version: `node --version` (should be 18+)
-- Update dependencies: `npm update`
-- Clear Vite cache: Delete `.vite` folder if it exists
+### OTP is invalid
 
-### Database Issues
+- Make sure you use the latest OTP from backend log
+- Do not restart backend before verifying OTP
+- If backend restarts, register again to generate a new OTP
 
-**Problem: SQL script execution fails**
-- Ensure you're connected to the correct SQL Server instance
-- Check SQL Server version compatibility
-- Verify you have sufficient permissions to create databases
+### Login returns account not found
 
-**Problem: Tables not created**
-- Re-run the SQL script
-- Check for error messages in SQL Server Management Studio
-- Verify the database `EVBatterySwap` exists
+That usually means OTP verification has not completed successfully, so the account has not been created yet.
 
----
+## Docker note
 
-## Additional Resources
+The current [`SWP_EVBatteryChangeStation_BE/docker-compose.yml`](SWP_EVBatteryChangeStation_BE/docker-compose.yml) is still aligned with the older SQL Server setup and is not the recommended path for the current local project state.
 
-- **Backend Deployment Guide:** See `SWP_EVBatteryChangeStation_BE/DEPLOYMENT_GUIDE.md`
-- **Backend README:** See `SWP_EVBatteryChangeStation_BE/README.md`
-- **.NET Documentation:** https://docs.microsoft.com/en-us/dotnet/
-- **React Documentation:** https://react.dev/
-- **Vite Documentation:** https://vitejs.dev/
+Recommended local workflow for this repo right now:
 
----
+- PostgreSQL local
+- `dotnet ef database update`
+- `dotnet run --launch-profile https`
+- `npm run dev`
 
-## Support
+## Security note
 
-For issues or questions, please refer to the project documentation or contact the development team.
+For team sharing or deployment, move sensitive values out of committed files:
+
+- DB password
+- JWT key
+- email credentials
+- third-party API keys
+
+Use environment variables, `dotnet user-secrets`, or deployment secrets instead.

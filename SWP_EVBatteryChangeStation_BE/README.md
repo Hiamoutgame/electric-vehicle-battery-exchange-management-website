@@ -1,49 +1,45 @@
 # SWP_EVBatteryChangeStation_BE
 
-Backend API for EV Battery Change Station system built with .NET 8.0
+ASP.NET Core Web API backend for the EV battery exchange management system.
 
-## Quick Start
+## Stack
 
-### Local Development
+- .NET 8
+- ASP.NET Core Web API
+- Entity Framework Core
+- PostgreSQL
+- JWT authentication
 
-1. **Using Docker Compose** (includes SQL Server):
-   ```bash
-   docker-compose up -d
-   ```
+## Run locally
 
-2. **Using Docker only**:
-   ```bash
-   docker build -t evbattery-api:latest .
-   docker run -p 8080:80 evbattery-api:latest
-   ```
+From this folder:
 
-3. **Direct .NET run**:
-   ```bash
-   cd EV_BatteryChangeStation
-   dotnet run
-   ```
+```bash
+dotnet restore
+dotnet ef database update --project EV_BatteryChangeStation_Repository --startup-project EV_BatteryChangeStation
+dotnet dev-certs https --trust
+dotnet run --project EV_BatteryChangeStation --launch-profile https
+```
 
-## Deployment
+Endpoints:
 
-📖 **See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for detailed deployment instructions.**
+- Swagger: `https://localhost:7071/swagger`
+- API base: `https://localhost:7071/api/v1`
 
-The backend can be deployed to:
-- Railway
-- Render
-- Azure Container Instances / App Service
-- AWS ECS/Fargate
-- Google Cloud Run
-- DigitalOcean App Platform
+## Connection string
 
-## Configuration
+Edit [`EV_BatteryChangeStation/appsettings.json`](EV_BatteryChangeStation/appsettings.json):
 
-- Update `appsettings.json` or use environment variables
-- Configure CORS for your frontend domain (Vercel)
-- Set up SQL Server database (Azure SQL, AWS RDS, etc.)
-- Configure VNPay return URLs for production
+```json
+"ConnectionStrings": {
+  "DefaultConnection": "Host=localhost;Port=5432;Database=ev_batteryChangeStation;Username=postgres;Password=YOUR_PASSWORD"
+}
+```
 
-## API Documentation
+## Notes
 
-Once running, access Swagger UI at:
-- Local: http://localhost:5204/swagger
-- Docker: http://localhost:8080/swagger
+- Migrations already include sample seed data.
+- Local OTP for registration is written to backend logs.
+- The current `docker-compose.yml` still reflects the older SQL Server path and is not the recommended setup for the repo in its current state.
+
+For the full project setup guide, use the root [`../README.md`](../README.md).

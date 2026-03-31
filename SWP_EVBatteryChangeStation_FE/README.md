@@ -1,18 +1,29 @@
-
-
 # SWP_EVBatteryChangeStation_FE
 
+React + Vite frontend for the EV battery exchange management system.
 
+## Run locally
 
-# React + Vite
+```bash
+npm install
+npm run dev
+```
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Required `.env`
 
-Currently, two official plugins are available:
+```env
+VITE_API_BASE_URL=https://localhost:7071/api
+```
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Optional keys used by some map features:
 
-## Expanding the ESLint configuration
+```env
+VITE_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_KEY
+VITE_APP_VIETMAP_API_KEY=YOUR_VIETMAP_KEY
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Notes
+
+- Backend should be running on `https://localhost:7071`
+- Frontend has been aligned to the current backend `/api/v1` routes
+- For full setup instructions, use the root [`../README.md`](../README.md)
