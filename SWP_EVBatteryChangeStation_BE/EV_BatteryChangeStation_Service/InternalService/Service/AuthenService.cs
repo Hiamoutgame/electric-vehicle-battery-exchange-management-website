@@ -6,6 +6,7 @@ using EV_BatteryChangeStation_Repository.Entities;
 using EV_BatteryChangeStation_Service.Base;
 using EV_BatteryChangeStation_Service.ExternalService.IService;
 using EV_BatteryChangeStation_Service.InternalService.IService;
+using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -23,12 +24,18 @@ public sealed class AuthenService : IAuthenService
     private readonly AppDbContext _context;
     private readonly IJWTService _jwtService;
     private readonly IPasswordHasher<Account> _passwordHasher;
+    private readonly ILogger<AuthenService> _logger;
 
-    public AuthenService(AppDbContext context, IJWTService jwtService, IPasswordHasher<Account> passwordHasher)
+    public AuthenService(
+        AppDbContext context,
+        IJWTService jwtService,
+        IPasswordHasher<Account> passwordHasher,
+        ILogger<AuthenService> logger)
     {
         _context = context;
         _jwtService = jwtService;
         _passwordHasher = passwordHasher;
+        _logger = logger;
     }
 
     public async Task<IServiceResult> AuthenticationLogin(LoginDTO login)
@@ -80,26 +87,52 @@ public sealed class AuthenService : IAuthenService
             return false;
         }
 
-        var exists = await _context.Accounts.AnyAsync(x => x.Email == dto.Email.Trim());
+        var email = dto.Email.Trim();
+        var now = DateTime.UtcNow;
+        var exists = await _context.Accounts.AnyAsync(x => x.Email == email);
         if (exists)
         {
             return false;
         }
 
+        if (PendingRegistrations.TryGetValue(email, out var existingPending) &&
+            existingPending.ExpiredAt >= now)
+        {
+            PendingRegistrations[email] = existingPending with
+            {
+                Password = dto.Password
+            };
+            LogOtp("REGISTER_REUSE", email, existingPending.OtpCode, existingPending.ExpiredAt);
+            return true;
+        }
+
         var otp = GenerateOtp();
-        PendingRegistrations[dto.Email.Trim()] = new PendingRegistration(
-            dto.Email.Trim(),
+        var expiredAt = now.AddMinutes(10);
+        PendingRegistrations[email] = new PendingRegistration(
+            email,
             dto.Password,
             otp,
-            DateTime.UtcNow.AddMinutes(10));
+            expiredAt);
+        LogOtp("REGISTER", email, otp, expiredAt);
 
         return true;
     }
 
     public Task<string> SendOtpAsync(string email)
     {
+        var normalizedEmail = email.Trim();
+        var now = DateTime.UtcNow;
+        if (PendingRegistrations.TryGetValue(normalizedEmail, out var existingPending) &&
+            existingPending.ExpiredAt >= now)
+        {
+            LogOtp("SEND_OTP_REUSE", normalizedEmail, existingPending.OtpCode, existingPending.ExpiredAt);
+            return Task.FromResult(existingPending.OtpCode);
+        }
+
         var otp = GenerateOtp();
-        PendingRegistrations[email.Trim()] = new PendingRegistration(email.Trim(), string.Empty, otp, DateTime.UtcNow.AddMinutes(10));
+        var expiredAt = now.AddMinutes(10);
+        PendingRegistrations[normalizedEmail] = new PendingRegistration(normalizedEmail, string.Empty, otp, expiredAt);
+        LogOtp("SEND_OTP", normalizedEmail, otp, expiredAt);
         return Task.FromResult(otp);
     }
 
@@ -115,9 +148,13 @@ public sealed class AuthenService : IAuthenService
             return false;
         }
 
-        var driverRole = await _context.Roles.FirstOrDefaultAsync(x => x.RoleName == "DRIVER");
+        var driverRole = await _context.Roles.FirstOrDefaultAsync(x =>
+            x.RoleName == "DRIVER" || x.RoleName == "CUSTOMER");
         if (driverRole is null)
         {
+            _logger.LogError(
+                "Unable to create account for {Email} because neither DRIVER nor CUSTOMER role exists.",
+                pending.Email);
             return false;
         }
 
@@ -169,7 +206,18 @@ public sealed class AuthenService : IAuthenService
             return ServiceResponse.NotFound("Account not found.");
         }
 
-        PendingResets[email] = new PendingReset(email, GenerateOtp(), DateTime.UtcNow.AddMinutes(10));
+        var now = DateTime.UtcNow;
+        if (PendingResets.TryGetValue(email, out var existingPending) &&
+            existingPending.ExpiredAt >= now)
+        {
+            LogOtp("FORGOT_PASSWORD_REUSE", email, existingPending.OtpCode, existingPending.ExpiredAt);
+            return ServiceResponse.Ok("OTP generated successfully.");
+        }
+
+        var otp = GenerateOtp();
+        var expiredAt = now.AddMinutes(10);
+        PendingResets[email] = new PendingReset(email, otp, expiredAt);
+        LogOtp("FORGOT_PASSWORD", email, otp, expiredAt);
         return ServiceResponse.Ok("OTP generated successfully.");
     }
 
@@ -216,6 +264,16 @@ public sealed class AuthenService : IAuthenService
 
     private static string GenerateOtp()
         => Random.Shared.Next(100000, 999999).ToString();
+
+    private void LogOtp(string purpose, string email, string otp, DateTime expiredAt)
+    {
+        _logger.LogWarning(
+            "LOCAL OTP [{Purpose}] Email={Email} OTP={Otp} ExpiresAtUtc={ExpiresAtUtc}",
+            purpose,
+            email,
+            otp,
+            expiredAt);
+    }
 
     private async Task<string> GenerateUniqueUsernameAsync(string email)
     {

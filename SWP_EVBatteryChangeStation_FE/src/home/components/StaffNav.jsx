@@ -8,15 +8,11 @@ const StaffNav = () => {
   const [isSidebar] = useState(false);
   const navigate = useNavigate();
 
-  const handleLogout = async (e) => {
-    e.preventDefault(); // Prevent default link behavior
+  const handleLogout = async (event) => {
+    event.preventDefault();
     try {
       await authService.logout();
-      tokenUtils.clearUserData();
-      navigate("/login");
-    } catch (err) {
-      console.log("Logout error:", err);
-      // Clear data even if API call fails
+    } finally {
       tokenUtils.clearUserData();
       navigate("/login");
     }
@@ -26,21 +22,9 @@ const StaffNav = () => {
     <nav className={`admin-nav ${isSidebar ? "sidebar" : "topbar"} `}>
       <ul className="navbar-links">
         <h1 style={{ fontSize: "20px", fontWeight: "bold" }}>Xin chào staff</h1>
-        <li>
-          <Link to="/staff">Lịch đổi pin</Link>
-        </li>
-        <li>
-          <Link to="/staff/battery">Quản lý pin</Link>
-        </li>
-        <li>
-          <Link to="/staff/feedback">Phản hồi</Link>
-        </li>
-        <li>
-          <Link to="/staff/swapping">Giao dịch đổi pin</Link>
-        </li>
-        <li>
-          <Link to="/staff/support">Hỗ trợ</Link>
-        </li>
+        <li><Link to="/staff">Booking của trạm</Link></li>
+        <li><Link to="/staff/battery">Inventory pin</Link></li>
+        <li><Link to="/staff/support">Hỗ trợ</Link></li>
         <li>
           <Link to="#" onClick={handleLogout}>
             Đăng xuất

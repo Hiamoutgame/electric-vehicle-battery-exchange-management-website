@@ -1,85 +1,66 @@
 import axiosClient from "./axiosClient";
+import { unsupportedOperation, unwrapApiData, unwrapArray } from "./apiHelpers";
+
+const normalizePayment = (payment) => ({
+  ...payment,
+  paymentId: payment?.paymentId || "",
+  price: payment?.price ?? payment?.amount ?? 0,
+  method: payment?.method || payment?.paymentMethod || "",
+  status: payment?.status ?? false,
+  createDate: payment?.createDate || payment?.paidAt || "",
+});
 
 const paymentService = {
-  // Tạo payment mới
-  createPayment: async (paymentData) => {
-    try {
-      const response = await axiosClient.post("/Payment/create", paymentData);
-      return response.data;
-    } catch (error) {
-      console.error("Error creating payment:", error);
-      throw error;
-    }
-  },
+  createPayment: async () =>
+    unsupportedOperation(
+      "Backend hiện chưa có route thanh toán subscription cho frontend trong bộ /api/v1."
+    ),
 
-  // Lấy thông tin payment theo ID
   getPaymentById: async (paymentId) => {
+    const payments = await paymentService.getPaymentsByAccountId();
+    return payments.find((payment) => payment.paymentId === paymentId) || null;
+  },
+
+  getAllPayments: async () => paymentService.getPaymentsByAccountId(),
+
+  getPaymentsByAccountId: async () => {
+    const response = await axiosClient.get("/driver/payments");
+    return unwrapArray(response.data).map(normalizePayment);
+  },
+
+  updatePayment: async () =>
+    unsupportedOperation(
+      "Backend hiện chưa có API cập nhật payment cho frontend trong bộ /api/v1."
+    ),
+
+  deletePayment: async () =>
+    unsupportedOperation(
+      "Backend hiện chưa có API xóa payment cho frontend trong bộ /api/v1."
+    ),
+
+  getCurrentSubscription: async () => {
     try {
-      const response = await axiosClient.get(`/Payment/GetById/${paymentId}`);
-      return response.data;
+      const response = await axiosClient.get("/driver/subscriptions/current");
+      return unwrapApiData(response.data);
     } catch (error) {
-      console.error("Error getting payment by ID:", error);
+      if (error?.response?.status === 404) {
+        return null;
+      }
+
       throw error;
     }
   },
 
-  // Lấy tất cả payments
-  getAllPayments: async () => {
-    try {
-      const response = await axiosClient.get("/Payment/GetAll");
-      return response.data;
-    } catch (error) {
-      console.error("Error getting all payments:", error);
-      throw error;
-    }
-  },
+  checkSubscriptionStatus: async () => {
+    const subscription = await paymentService.getCurrentSubscription();
 
-  // Lấy payments theo accountId
-  getPaymentsByAccountId: async (accountId) => {
-    try {
-      const response = await axiosClient.get(`/Payment/get-by-account/${accountId}`);
-      return response.data;
-    } catch (error) {
-      console.error("Error getting payments by account ID:", error);
-      throw error;
-    }
-  },
-
-  // Cập nhật payment
-  updatePayment: async (paymentId, paymentData) => {
-    try {
-      const response = await axiosClient.put(`/Payment/Update/${paymentId}`, paymentData);
-      return response.data;
-    } catch (error) {
-      console.error("Error updating payment:", error);
-      throw error;
-    }
-  },
-
-  // Xóa payment (soft delete)
-  deletePayment: async (paymentId) => {
-    try {
-      const response = await axiosClient.delete(`/Payment/Delete/${paymentId}`);
-      return response.data;
-    } catch (error) {
-      console.error("Error deleting payment:", error);
-      throw error;
-    }
-  },
-
-  // Kiểm tra trạng thái subscription của user
-  checkSubscriptionStatus: async (accountId) => {
-    try {
-      const response = await axiosClient.get("/Payment/check-subscription-status", {
-        params: { accountId },
-      });
-      return response.data;
-    } catch (error) {
-      console.error("Error checking subscription status:", error);
-      throw error;
-    }
+    return {
+      hasActiveSubscription: !!subscription,
+      needsRedirect: !subscription,
+      payment: subscription,
+      subscription,
+    };
   },
 };
 
 export default paymentService;
-

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Button from "../../../components/button";
 import { notifySuccess, notifyError } from "@/components/notification/notification";
@@ -9,22 +9,7 @@ import "./signIn.css";
 
 const getRedirectPath = async (user) => {
   if (!user) return "/userPage";
-
-  try {
-    const roleName = user.roleName || user.role || "";
-    const roleId = user.roleId || "";
-    
-    // Sử dụng roleService để lấy redirect path
-    const redirectPath = await roleService.getRedirectPathByRole(roleName, roleId);
-    return redirectPath;
-  } catch (error) {
-    console.error("Error getting redirect path:", error);
-    // Fallback về default route
-    const roleName = (user.roleName || user.role || "").toLowerCase();
-    if (roleName === "admin") return "/admin";
-    if (roleName === "staff") return "/staff";
-    return "/userPage";
-  }
+  return roleService.getRedirectPathByRole(user.roleName || user.role, user.roleId);
 };
 
 const SignIn = () => {
@@ -35,41 +20,45 @@ const SignIn = () => {
   useEffect(() => {
     const checkExistingLogin = async () => {
       if (tokenUtils.isLoggedIn()) {
-        const userData = tokenUtils.getUserData();
+        const userData = await tokenUtils.autoLogin();
         if (userData) {
-          const redirectPath = await getRedirectPath(userData);
-          navigate(redirectPath);
+          navigate(await getRedirectPath(userData));
         }
       }
     };
+
     checkExistingLogin();
   }, [navigate]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
     try {
-      const res = await authService.login(email, password);
-      const token = res?.data?.data;
+      const loginData = await authService.login(email, password);
+      const token = loginData?.accessToken;
 
       if (!token) {
-        notifyError("Đăng nhập thất bại!");
+        notifyError("Đăng nhập thất bại.");
         return;
       }
 
       localStorage.setItem("token", token);
-
       const userProfile = await tokenUtils.processLoginToken(token);
+
       if (!userProfile) {
-        notifyError("Không thể lấy thông tin người dùng!");
+        notifyError("Không thể tải hồ sơ người dùng.");
         return;
       }
 
-      notifySuccess(`Xin chào ${userProfile.fullName || "User"}!`);
-      const redirectPath = await getRedirectPath(userProfile);
-      navigate(redirectPath);
-    } catch (err) {
-      console.error("Login failed:", err);
-      notifyError(err?.response?.data?.message || "Sai tài khoản hoặc mật khẩu!");
+      notifySuccess(`Xin chào ${userProfile.fullName || userProfile.accountName}!`);
+      navigate(await getRedirectPath(userProfile));
+    } catch (error) {
+      notifyError(
+        authService.getErrorMessage(
+          error,
+          "Sai tài khoản hoặc mật khẩu."
+        )
+      );
     }
   };
 
@@ -86,7 +75,7 @@ const SignIn = () => {
           <input
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(event) => setEmail(event.target.value)}
             placeholder="Email Address"
             required
           />
@@ -97,7 +86,7 @@ const SignIn = () => {
           <input
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(event) => setPassword(event.target.value)}
             placeholder="Password"
             required
           />

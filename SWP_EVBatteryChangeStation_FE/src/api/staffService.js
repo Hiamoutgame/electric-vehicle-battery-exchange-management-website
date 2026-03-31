@@ -1,23 +1,28 @@
 import axiosClient from "./axiosClient";
+import { unwrapApiData, unwrapArray } from "./apiHelpers";
+
+const normalizeSupportRequest = (request) => ({
+  ...request,
+  requestId: request?.requestId || request?.supportRequestId || "",
+  issueType: request?.issueType || request?.category || "Khác",
+  description: request?.description || "",
+  createDate: request?.createDate || request?.createdAt || "",
+  responseText: request?.responseText || "",
+});
 
 const staffService = {
   getAllSupportRequests: async () => {
-    try {
-      const response = await axiosClient.get("/SupportRequest/GetAll");
-      return response.data;
-    } catch (error) {
-      console.error("Error getting all support requests:", error);
-      throw error;
-    }
+    const response = await axiosClient.get("/staff/support-requests");
+    return unwrapArray(response.data).map(normalizeSupportRequest);
   },
+
   updateSupportRequest: async (id, supportRequest) => {
-    try {
-      const response = await axiosClient.put(`/SupportRequest/Update/${id}`, supportRequest);
-      return response.data;
-    } catch (error) {
-      console.error("Error updating support request:", error);
-      throw error;
-    }
+    const response = await axiosClient.patch(`/staff/support-requests/${id}/response`, {
+      status: supportRequest.status,
+      responseMessage: supportRequest.responseText || supportRequest.responseMessage || "",
+    });
+
+    return normalizeSupportRequest(unwrapApiData(response.data));
   },
 };
 

@@ -1,4 +1,3 @@
-// src/pages/support-request/SupportRequest.jsx
 import Button from "@/components/button";
 import React, { useEffect } from "react";
 import TabSection from "./../../../components/tab-section/TabSection";
@@ -13,23 +12,12 @@ import supportRequestService from "@/api/supportRequestService";
 import { notifySuccess, notifyError } from "@/components/notification/notification";
 
 const SupportRequestContent = () => {
-  const { setIsModalOpen, isModalOpen, addRequest, fetchRequests, loading, setActiveTab } = useSupportRequest();
+  const { setIsModalOpen, isModalOpen, addRequest, fetchRequests, loading, setActiveTab } =
+    useSupportRequest();
 
-  // Helper function để lấy accountId
-  const getAccountId = () => {
-    const userString = localStorage.getItem("user");
-    const user = userString ? JSON.parse(userString) : null;
-    return user?.accountId;
-  };
-
-  // Fetch data khi component mount - chỉ chạy 1 lần
   useEffect(() => {
-    const accountId = getAccountId();
-    if (accountId) {
-      fetchRequests(accountId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Chỉ chạy khi component mount, không phụ thuộc vào fetchRequests
+    fetchRequests();
+  }, [fetchRequests]);
 
   const initialValues = {
     issueType: "",
@@ -71,45 +59,18 @@ const SupportRequestContent = () => {
 
   const handleSubmit = async (values) => {
     try {
-      const accountId = getAccountId();
-      
-      const requestPayload = {
+      const response = await supportRequestService.createSupportRequest({
         issueType: values.issueType,
         description: values.description,
-        accountId: accountId,
-        responseText: "",
-      };
+      });
 
-      const response = await supportRequestService.createSupportRequest(
-        requestPayload
-      );
-
-      console.log("Support request created:", response);
-
-      // Thêm vào context để hiển thị trong danh sách
-      // response có thể là { data: {...} } hoặc trực tiếp là data object
-      const newRequestData = response.data || response;
-      
-      // Đảm bảo request mới được thêm vào với status 'pending' và chuyển tab
-      // React sẽ batch các state updates, nên cả hai sẽ update cùng lúc
-      addRequest(newRequestData);
-      setActiveTab('pending');
-
+      addRequest(response);
+      setActiveTab("pending");
       setIsModalOpen(false);
-      notifySuccess("Yêu cầu hỗ trợ đã được gửi thành công!");
-      
-      // Không refresh ngay lập tức vì đã có addRequest
-      // Chỉ refresh sau một khoảng thời gian ngắn để đảm bảo data đồng bộ
-      // (optional - có thể bỏ qua nếu không cần)
-      // if (accountId) {
-      //   setTimeout(() => {
-      //     fetchRequests(accountId);
-      //   }, 1000);
-      // }
+      notifySuccess("Yêu cầu hỗ trợ đã được gửi thành công.");
     } catch (error) {
-      console.error("Error submitting support request:", error);
-      notifyError("Có lỗi xảy ra khi gửi yêu cầu. Vui lòng thử lại!");
-      throw error; // Ném lỗi để Formik biết submission failed
+      notifyError("Có lỗi xảy ra khi gửi yêu cầu.");
+      throw error;
     }
   };
 
@@ -127,7 +88,6 @@ const SupportRequestContent = () => {
           )}
         </div>
 
-        {/* Button tạo yêu cầu mới */}
         <div className="fixed bottom-8 right-8">
           <Button onclick={() => setIsModalOpen(true)}>Tạo yêu cầu mới</Button>
         </div>
@@ -147,7 +107,6 @@ const SupportRequestContent = () => {
   );
 };
 
-// Component chính với Provider
 const SupportRequest = () => {
   return (
     <SupportRequestProvider>

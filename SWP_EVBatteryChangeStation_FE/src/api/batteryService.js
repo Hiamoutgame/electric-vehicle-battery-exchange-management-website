@@ -1,109 +1,72 @@
+import stationService from "./stationService";
+import carService from "./carService";
 import axiosClient from "./axiosClient";
-import { notifyError } from "@/components/notification/notification";
+import { unsupportedOperation, unwrapApiData, unwrapArray } from "./apiHelpers";
+
+const normalizeBattery = (battery) => ({
+  ...battery,
+  batteryId: battery?.batteryId || "",
+  stationId: battery?.stationId || "",
+  typeBattery: battery?.typeBattery || battery?.batteryTypeId || "",
+  status: battery?.status ?? true,
+});
 
 const batteryService = {
-  getAllBatteries: async () => {
-    try {
-      const response = await axiosClient.get("/Battery/GetAllBattery");
-      return response.data?.data || [];
-    } catch (error) {
-      console.error("Error fetching batteries:", error);
-      notifyError("Không thể tải danh sách pin!");
-      throw error;
-    }
-  },
+  getAllBatteries: async () =>
+    unsupportedOperation(
+      "Backend hiện không có API public lấy toàn bộ pin trong bộ route /api/v1."
+    ),
 
-  // Lấy danh sách pin của station mà staff đang làm việc (yêu cầu đăng nhập)
   getMyStationBatteries: async () => {
-    try {
-      const response = await axiosClient.get("/Battery/staff/my-station-batteries");
-      // Cấu trúc: response.data.data.batteries
-      const batteries = response.data?.data?.batteries || [];
-      return Array.isArray(batteries) ? batteries : [];
-    } catch (error) {
-      console.error("Error fetching my station batteries:", error);
-      notifyError("Không thể tải danh sách pin của trạm!");
-      throw error;
-    }
+    const response = await axiosClient.get("/staff/inventory");
+    return unwrapArray(response.data).map(normalizeBattery);
   },
 
   getBatteryById: async (batteryId) => {
-    try {
-      const response = await axiosClient.get(`/Battery/GetBatteryById/${batteryId}`);
-      return response.data?.data;
-    } catch (error) {
-      console.error("Error fetching battery:", error);
-      throw error;
-    }
+    const batteries = await batteryService.getMyStationBatteries();
+    return batteries.find((battery) => battery.batteryId === batteryId) || null;
   },
 
-  // Lọc pin theo loại pin (typeBattery) phù hợp với batteryType của car
   getBatteriesByType: async (batteryType) => {
-    try {
-      const allBatteries = await batteryService.getAllBatteries();
-      // So sánh typeBattery của pin với batteryType của car (case-insensitive)
-      const normalizedType = (batteryType || "").toLowerCase();
-      return allBatteries.filter(
-        (b) => (b.typeBattery || "").toLowerCase() === normalizedType && b.status === true
-      );
-    } catch (error) {
-      console.error("Error filtering batteries by type:", error);
-      throw error;
-    }
+    const batteries = await batteryService.getMyStationBatteries();
+    const normalizedType = (batteryType || "").toLowerCase();
+    return batteries.filter(
+      (battery) => (battery.typeBattery || "").toLowerCase() === normalizedType
+    );
   },
 
-  // Đếm số lượng pin theo stationId (chỉ đếm pin có status = true)
   getBatteryCountByStationId: async (stationId) => {
-    try {
-      const allBatteries = await batteryService.getAllBatteries();
-      return allBatteries.filter(
-        (b) => b.stationId === stationId && b.status === true
-      ).length;
-    } catch (error) {
-      console.error("Error counting batteries by station:", error);
-      throw error;
-    }
+    const stations = await stationService.getStationList();
+    const station = stations.find((item) => item.stationId === stationId);
+    return station?.batteryQuantity ?? 0;
   },
 
-  // Lấy danh sách pin theo stationId (chỉ pin có status = true)
   getBatteriesByStationId: async (stationId) => {
-    try {
-      const allBatteries = await batteryService.getAllBatteries();
-      return allBatteries.filter(
-        (b) => b.stationId === stationId && b.status === true
-      );
-    } catch (error) {
-      console.error("Error getting batteries by station:", error);
-      throw error;
-    }
+    const batteries = await batteryService.getMyStationBatteries();
+    return batteries.filter((battery) => battery.stationId === stationId);
   },
 
-  // Cập nhật battery (để set status = false khi đã dùng)
   updateBattery: async (batteryId, payload) => {
-    try {
-      const response = await axiosClient.put("/Battery/UpdateBattery", {
-        batteryId: batteryId,
-        ...payload,
-      });
-      return response.data;
-    } catch (error) {
-      console.error("Error updating battery:", error);
-      throw error;
-    }
+    const response = await axiosClient.patch(`/staff/batteries/${batteryId}/status`, {
+      status: payload?.status ?? false,
+      reason: payload?.reason || "",
+    });
+
+    return unwrapApiData(response.data);
   },
-  // Preview pin sẽ được gán cho booking (BE tự chọn pin phù hợp)
+
   previewForBooking: async (stationId, vehicleId) => {
-    try {
-      const response = await axiosClient.get("/Battery/PreviewForBooking", {
-        params: { stationId, vehicleId },
-      });
-      return response.data;
-    } catch (error) {
-      console.error("Error previewing booking:", error);
-      throw error;
-    }
+    const [stationCount, car] = await Promise.all([
+      batteryService.getBatteryCountByStationId(stationId),
+      carService.getCarById(vehicleId),
+    ]);
+
+    return {
+      isAvailable: stationCount > 0,
+      batteryType: car?.batteryType || "Compatible battery",
+      batteryId: null,
+    };
   },
 };
 
 export default batteryService;
-

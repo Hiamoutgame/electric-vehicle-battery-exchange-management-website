@@ -1,60 +1,50 @@
 import axiosClient from "./axiosClient";
-import { notifyError } from "@/components/notification/notification";
+import { unwrapApiData, unwrapArray } from "./apiHelpers";
 
-const stationSevice = {
-  getStationList: async () => {
-    try {
-      const response = await axiosClient.get("/Station/SelectAll");
-      return response.data.data;
-    } catch (error) {
-      notifyError("Không thể tải danh sách trạm. Vui lòng thử lại!");
-      console.error("Error fetching stations:", error);
-      throw error;
-    }
+const normalizeStation = (station) => ({
+  ...station,
+  stationId: station?.stationId || station?.id || "",
+  stationName: station?.stationName || station?.name || "",
+  name: station?.stationName || station?.name || "",
+  accountName: station?.stationName || station?.name || "",
+  address: station?.address || "",
+  phoneNumber: station?.phoneNumber || "",
+  batteryQuantity: station?.batteryQuantity ?? 0,
+  status: station?.status ?? true,
+});
+
+const stationService = {
+  getStationList: async (keyword = "") => {
+    const response = await axiosClient.get("/stations", {
+      params: keyword ? { keyword } : undefined,
+    });
+
+    return unwrapArray(response.data).map(normalizeStation);
+  },
+
+  getStationDetail: async (stationId) => {
+    const response = await axiosClient.get(`/stations/${stationId}`);
+    return normalizeStation(unwrapApiData(response.data));
   },
 
   createStation: async (payload) => {
-    try {
-      const response = await axiosClient.post("/Station/Create", payload);
-      return response.data;
-    } catch (error) {
-      notifyError("Không thể tạo trạm. Vui lòng thử lại!");
-      console.error("Error creating station:", error);
-      throw error;
-    }
+    const response = await axiosClient.post("/admin/stations", payload);
+    return unwrapApiData(response.data);
   },
 
   updateStation: async (stationId, payload) => {
-    try {
-      const response = await axiosClient.put(`/Station/Update/${stationId}`, payload);
-      return response.data;
-    } catch (error) {
-      notifyError("Không thể cập nhật trạm. Vui lòng thử lại!");
-      console.error("Error updating station:", error);
-      throw error;
-    }
+    const response = await axiosClient.patch(`/admin/stations/${stationId}`, payload);
+    return unwrapApiData(response.data);
   },
 
   deleteStation: async (stationId) => {
-    try {
-      const response = await axiosClient.delete(`/Station/Delete/${stationId}`);
-      return response.data;
-    } catch (error) {
-      notifyError("Không thể xóa trạm. Vui lòng thử lại!");
-      console.error("Error deleting station:", error);
-      throw error;
-    }
+    const response = await axiosClient.delete(`/admin/stations/${stationId}`);
+    return unwrapApiData(response.data);
   },
-  
+
   getStationsByName: async (keyword) => {
-    try {
-      const response = await axiosClient.get(`/Station/${keyword}`);
-      return response.data;
-    } catch (error) {
-      notifyError("Không thể tải danh sách trạm. Vui lòng thử lại!");
-      console.error("Error getting stations by name:", error);
-      throw error;
-    }
+    return stationService.getStationList(keyword);
   },
 };
-export default stationSevice;
+
+export default stationService;

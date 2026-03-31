@@ -1,71 +1,82 @@
-// src/api/feedbackService.js
 import axiosClient from "./axiosClient";
+import { unsupportedOperation, unwrapApiData } from "./apiHelpers";
+
+const STORAGE_KEY = "ev_feedback_cache";
+
+const readCache = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeCache = (items) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+};
+
+const normalizeFeedback = (feedback) => ({
+  ...feedback,
+  feedbackId: feedback?.feedbackId || crypto.randomUUID(),
+  bookingId: feedback?.bookingId || "",
+  accountId: feedback?.accountId || "",
+  rating: Number(feedback?.rating || 0),
+  comment: feedback?.comment || "",
+  createDate: feedback?.createDate || new Date().toISOString(),
+});
 
 const feedbackService = {
   getAllFeedbacks: async () => {
-    try {
-      const res = await axiosClient.get("/FeedBack/SelectAll");
-      return res.data;
-    } catch (error) {
-      console.error("❌ Error fetching all feedbacks:", error);
-      throw error;
-    }
+    return readCache().map(normalizeFeedback);
   },
 
   getFeedbackById: async (id) => {
-    try {
-      const res = await axiosClient.get(`/FeedBack/Select/${id}`);
-      return res.data;
-    } catch (error) {
-      console.error("❌ Error fetching feedback:", error);
-      throw error;
-    }
+    const feedbacks = readCache().map(normalizeFeedback);
+    return feedbacks.find((feedback) => feedback.feedbackId === id) || null;
   },
 
   createFeedback: async ({ bookingId, accountId, rating, comment }) => {
-    try {
-      const res = await axiosClient.post("/FeedBack/Create", {
-        bookingId,
-        accountId,
-        rating,
-        comment,
-      });
-      return res.data;
-    } catch (error) {
-      console.error("❌ Error creating feedback:", error);
-      throw error;
-    }
+    const response = await axiosClient.post("/driver/feedback", {
+      bookingId,
+      rating,
+      comment,
+    });
+
+    const apiData = unwrapApiData(response.data) || {};
+    const newFeedback = normalizeFeedback({
+      ...apiData,
+      bookingId,
+      accountId,
+      rating,
+      comment,
+    });
+
+    const feedbacks = readCache();
+    const nextFeedbacks = [
+      newFeedback,
+      ...feedbacks.filter((item) => item.bookingId !== bookingId),
+    ];
+    writeCache(nextFeedbacks);
+
+    return newFeedback;
   },
 
-  updateFeedback: async (id, data) => {
-    try {
-      const res = await axiosClient.put(`/FeedBack/Update/${id}`, data);
-      return res.data;
-    } catch (error) {
-      console.error("❌ Error updating feedback:", error);
-      throw error;
-    }
-  },
+  updateFeedback: async () =>
+    unsupportedOperation(
+      "Backend hiện chưa có API cập nhật feedback trong bộ /api/v1."
+    ),
 
-  deleteFeedback: async (id) => {
-    try {
-      const res = await axiosClient.delete(`/FeedBack/HardDelete/${id}`);
-      return res.data;
-    } catch (error) {
-      console.error("❌ Error deleting feedback:", error);
-      throw error;
-    }
-  },
-  getFeedbackByAccountId: async (id) => {
-    try {
-      const res = await axiosClient.get(`/FeedBack/SelectByAccount/${id}`);
-      return res.data;
-    } catch (error) {
-      console.error("❌ Error fetching feedback:", error);
-      throw error;
-    }
-  },
+  deleteFeedback: async () =>
+    unsupportedOperation(
+      "Backend hiện chưa có API xóa feedback trong bộ /api/v1."
+    ),
 
+  getFeedbackByAccountId: async (accountId) => {
+    return readCache()
+      .map(normalizeFeedback)
+      .filter((feedback) => feedback.accountId === accountId);
+  },
 };
 
 export default feedbackService;

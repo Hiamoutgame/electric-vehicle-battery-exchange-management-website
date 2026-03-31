@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import Button from "../../../components/button";
 import { toast } from "react-toastify";
 import authService from "@/api/authService";
+import Button from "../../../components/button";
 import "./signUp.css";
 
 const SignUp = () => {
@@ -11,21 +11,22 @@ const SignUp = () => {
   const [confirm, setConfirm] = useState("");
   const navigate = useNavigate();
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
 
     if (password !== confirm) {
-      toast.error("Mật khẩu không trùng khớp!");
+      toast.error("Mat khau khong trung khop.");
       return;
     }
 
     try {
       await authService.register(email, password);
-      toast.success("Đăng ký thành công! Vui lòng kiểm tra OTP trong email.");
+      localStorage.setItem("pendingVerificationEmail", email);
+      toast.success("Da tao OTP. Kiem tra console/log backend de lay ma xac thuc.");
       navigate("/verifyOtp", { state: { email } });
-    } catch (err) {
-      console.error("Sign up failed:", err);
-      toast.error(err?.response?.data?.message || "Đăng ký thất bại!");
+    } catch (error) {
+      console.error("Sign up failed:", error);
+      toast.error(authService.getErrorMessage(error, "Dang ky that bai."));
     }
   };
 
@@ -42,7 +43,7 @@ const SignUp = () => {
           <input
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(event) => setEmail(event.target.value)}
             placeholder="Enter email address"
             required
           />
@@ -53,7 +54,7 @@ const SignUp = () => {
           <input
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(event) => setPassword(event.target.value)}
             placeholder="Password"
             required
             minLength="6"
@@ -65,7 +66,7 @@ const SignUp = () => {
           <input
             type="password"
             value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
+            onChange={(event) => setConfirm(event.target.value)}
             placeholder="Confirm password"
             required
           />

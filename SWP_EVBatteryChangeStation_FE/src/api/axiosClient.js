@@ -1,38 +1,36 @@
 import axios from "axios";
-
-const apiBaseURL = import.meta.env?.VITE_API_BASE_URL;
+import { normalizeApiBaseUrl } from "./apiHelpers";
 
 const axiosClient = axios.create({
-  baseURL: apiBaseURL,
+  baseURL: normalizeApiBaseUrl(import.meta.env?.VITE_API_BASE_URL),
   headers: {
     "Content-Type": "application/json",
   },
 });
-// lấy token
+
 axiosClient.interceptors.request.use(
-  (config) => { 
+  (config) => {
     const token = localStorage.getItem("token");
+
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
-      // console.log("✅ Token attached:", token);
     }
-    console.log(config);
+
     return config;
   },
-  (err) => Promise.reject(err)
+  (error) => Promise.reject(error)
 );
 
 axiosClient.interceptors.response.use(
-  (response) => {
-    console.log(response);
-    return response;
-  },
+  (response) => response,
   (error) => {
-    console.error("API Error:", error);
+    if (error?.response?.status === 401 && localStorage.getItem("token")) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+    }
+
     return Promise.reject(error);
   }
 );
 
 export default axiosClient;
-
-// interceptors : Là 1 cơ chế cho phép bạn đón hoặc chặn các yêu cầu hoặc phản hồi

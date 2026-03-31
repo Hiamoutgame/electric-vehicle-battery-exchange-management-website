@@ -9,8 +9,8 @@ public static class DatabaseConnectionResolver
     {
         return configuration.GetConnectionString("PostgresConnection")
             ?? configuration.GetConnectionString("PostgresV2Connection")
-            ?? configuration.GetConnectionString("DefaultConnection")
-            ?? configuration.GetConnectionString("V2Connection");
+            ?? configuration.GetConnectionString("DefaultConnection");
+            
     }
 
     public static bool IsPostgres(string? connectionString)
