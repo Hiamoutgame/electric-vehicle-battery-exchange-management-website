@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import tokenUtils from "@/utils/tokenUtils";
 
 const TokenDataDebugger = () => {
-  const [tokenData, setTokenData] = useState(null);
   const [userData, setUserData] = useState(null);
   const [decodedToken, setDecodedToken] = useState(null);
 

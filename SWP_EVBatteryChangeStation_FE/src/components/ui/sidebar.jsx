@@ -1,7 +1,8 @@
-"use client";;
+/* eslint-disable react-refresh/only-export-components */
+"use client";
 import { cn } from "@/lib/utils";
 import React, { useState, createContext, useContext } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion as Motion } from "motion/react";
 import { IconMenu2, IconX } from "@tabler/icons-react";
 
 const SidebarContext = createContext(undefined);
@@ -62,7 +63,7 @@ export const DesktopSidebar = ({
   const { open, setOpen, animate } = useSidebar();
   return (
     <>
-      <motion.div
+      <Motion.div
         className={cn(
           "h-full px-4 py-4 hidden  md:flex md:flex-col bg-neutral-100 dark:bg-neutral-800 w-[300px] shrink-0",
           className
@@ -74,7 +75,7 @@ export const DesktopSidebar = ({
         onMouseLeave={() => setOpen(false)}
         {...props}>
         {children}
-      </motion.div>
+      </Motion.div>
     </>
   );
 };
@@ -99,7 +100,7 @@ export const MobileSidebar = ({
         </div>
         <AnimatePresence>
           {open && (
-            <motion.div
+            <Motion.div
               initial={{ x: "-100%", opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: "-100%", opacity: 0 }}
@@ -117,7 +118,7 @@ export const MobileSidebar = ({
                 <IconX />
               </div>
               {children}
-            </motion.div>
+            </Motion.div>
           )}
         </AnimatePresence>
       </div>
@@ -137,14 +138,14 @@ export const SidebarLink = ({
       className={cn("flex items-center justify-start gap-2  group/sidebar py-2", className)}
       {...props}>
       {link.icon}
-      <motion.span
+      <Motion.span
         animate={{
           display: animate ? (open ? "inline-block" : "none") : "inline-block",
           opacity: animate ? (open ? 1 : 0) : 1,
         }}
         className="text-neutral-700 dark:text-neutral-200 text-sm group-hover/sidebar:translate-x-1 transition duration-150 whitespace-pre inline-block !p-0 !m-0">
         {link.label}
-      </motion.span>
+      </Motion.span>
     </a>
   );
 };

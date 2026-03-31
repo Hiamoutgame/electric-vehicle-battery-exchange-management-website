@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
 const FailedPage = () => {
-  const location = useLocation();
   const navigate = useNavigate();
   const latestBookingId = JSON.parse(sessionStorage.getItem("latestBooking"));
   // const transactionId = location.state?.transactionId;
@@ -56,7 +55,7 @@ const FailedPage = () => {
     };
 
     processFailure();
-  }, [transactionId, navigate]);
+  }, [latestBookingId, transactionId, navigate]);
 
   return (
     <div style={{ textAlign: "center", marginTop: "40px", fontSize: "20px" }}>

@@ -8,10 +8,11 @@ export default function PlanCard({
   highlight = false,
   onAction = () => {},
   gradient,
-  icon: Icon,
+  icon,
   disabled = false,
   isOwned = false,
 }) {
+  const PlanIcon = icon;
   return (
     <div
       className={[
@@ -63,7 +64,7 @@ export default function PlanCard({
               `bg-gradient-to-br ${gradient} shadow-lg`,
             ].join(" ")}
           >
-            <Icon className="w-7 h-7 text-white" />
+            {PlanIcon ? <PlanIcon className="w-7 h-7 text-white" /> : null}
           </div>
 
           {/* Plan Name */}

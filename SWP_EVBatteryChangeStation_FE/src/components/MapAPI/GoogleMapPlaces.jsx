@@ -13,7 +13,6 @@ export default function GoogleMapPlaces() {
     libraries: ["places"],
   });
 
-  const [map, setMap] = useState(null);
   const [places, setPlaces] = useState([]);
   const [location, setLocation] = useState({ lat: 10.7769, lng: 106.7009 }); // default: HCM
 
@@ -33,7 +32,6 @@ export default function GoogleMapPlaces() {
   }, []);
   
   const onLoad = (mapInstance) => {
-    setMap(mapInstance);
     const service = new window.google.maps.places.PlacesService(mapInstance);
 
     const request = {

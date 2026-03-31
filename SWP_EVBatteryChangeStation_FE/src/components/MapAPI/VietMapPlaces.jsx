@@ -8,7 +8,6 @@ export default function VietMapPlaces({
   routeInfo = null,
   userLocation = null,  // NOTE: bro đang truyền [lng, lat] từ Stations.jsx
   API_KEY,
-  mode = "display",
 }) {
   const mapContainer = useRef(null);
   const mapRef = useRef(null);

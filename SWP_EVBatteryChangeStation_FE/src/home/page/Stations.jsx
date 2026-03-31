@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import VietMapPlaces from "@/components/MapAPI/VietMapPlaces";
 import StationSearch from "@/components/MapAPI/StationSearch";
 import stationService from "@/api/stationService";
@@ -15,28 +15,6 @@ const Stations = () => {
   const [routeInfo, setRouteInfo] = useState(null);
   const [selectedStation, setSelectedStation] = useState(null);
   const destRef = useRef(null);
-
-  useEffect(() => {
-    if (!("geolocation" in navigator)) {
-      setUserLocation([106.7, 10.77]);
-      return;
-    }
-
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        const location = [position.coords.longitude, position.coords.latitude];
-        setUserLocation(location);
-
-        if (destRef.current) {
-          updateRoute(location, destRef.current);
-        }
-      },
-      () => setUserLocation([106.7, 10.77]),
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
-    );
-
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, []);
 
   useEffect(() => {
     const loadStations = async () => {
@@ -107,7 +85,7 @@ const Stations = () => {
     notifyWarning("Trạm này chưa có tọa độ để chỉ đường.");
   };
 
-  const updateRoute = async (start, dest) => {
+  const updateRoute = useCallback(async (start, dest) => {
     try {
       const [userLat, userLng] = [start[1], start[0]];
       const routeUrl = `https://maps.vietmap.vn/api/route?api-version=1.1&apikey=${API_KEY}&point=${userLat},${userLng}&point=${dest.lat},${dest.lng}&points_encoded=false&vehicle=car`;
@@ -126,8 +104,33 @@ const Stations = () => {
         time: (path.time / 60000).toFixed(1),
         dest,
       });
-    } catch {}
-  };
+    } catch {
+      setRoute(null);
+      setRouteInfo(null);
+    }
+  }, [API_KEY]);
+
+  useEffect(() => {
+    if (!("geolocation" in navigator)) {
+      setUserLocation([106.7, 10.77]);
+      return;
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const location = [position.coords.longitude, position.coords.latitude];
+        setUserLocation(location);
+
+        if (destRef.current) {
+          updateRoute(location, destRef.current);
+        }
+      },
+      () => setUserLocation([106.7, 10.77]),
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [updateRoute]);
 
   return (
     <div className="w-full min-h-screen bg-gray-50 mt-[7rem]">

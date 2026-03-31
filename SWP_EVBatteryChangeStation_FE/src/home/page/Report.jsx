@@ -3,7 +3,6 @@ import axios from "axios";
 import "../components/AdminStyle.css";
 
 const RevenueReport = () => {
-  const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [monthlyData, setMonthlyData] = useState({});
 
@@ -17,7 +16,6 @@ const RevenueReport = () => {
         // Group payments by month
         const groupedByMonth = groupPaymentsByMonth(data);
 
-        setPayments(data);
         setMonthlyData(groupedByMonth);
         setLoading(false);
       } catch (error) {

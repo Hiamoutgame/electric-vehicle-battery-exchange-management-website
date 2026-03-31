@@ -24,24 +24,6 @@ const CarInfoPage = () => {
     }
   };
 
-  // Search by carId
-  const fetchCarByModel = async (model) => {
-    if (!model.trim()) return fetchAllCars();
-    setLoading(true);
-    try {
-      const response = await fetch(`${BASE_URL}/GetCarById?model=${model}`);
-      if (!response.ok) throw new Error("Car not found");
-      const result = await response.json();
-      if (result.data) setCars([result.data]);
-      else setCars([]);
-    } catch (err) {
-      setError(err.message);
-      setCars([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleDelete = async (accountId) => {
     if (!window.confirm("Confirm delete this account?")) return;
     try {

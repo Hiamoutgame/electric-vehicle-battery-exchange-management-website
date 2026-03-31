@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import carService from "@/api/carService";
 import { notifySuccess, notifyError } from "@/components/notification/notification";
 import { Car, Plus, Search, Edit, Trash2, X } from "lucide-react";
@@ -26,7 +26,7 @@ const AdminCarManagement = () => {
     result?.message || result?.data?.message || fallback;
 
   // Fetch all cars
-  const fetchCars = async () => {
+  const fetchCars = useCallback(async () => {
     try {
       setLoading(true);
       const data = await carService.getAllCars();
@@ -37,11 +37,11 @@ const AdminCarManagement = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchCars();
-  }, []);
+  }, [fetchCars]);
 
   // Reset form
   const resetForm = () => {
